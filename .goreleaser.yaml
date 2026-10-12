@@ -6,11 +6,11 @@
 # go run github.com/goreleaser/goreleaser/v2@v2.18.2 release --snapshot --clean
 version: 2
 
-project_name: crew
+project_name: crew-actions
 
 builds:
-  - main: ./cmd/crew
-    binary: crew
+  - main: ./cmd/crew-actions
+    binary: crew-actions
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin] # no Windows: internal/proc needs Unix process groups
