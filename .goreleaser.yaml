@@ -1,0 +1,57 @@
+# What a release builds and publishes: crew for macOS and Linux on amd64 and
+# arm64, one tar.gz per platform, and checksums.txt. The Release workflow
+# (.github/workflows/release.yml) runs it, attests the assets and says when a
+# release happens.
+# Try it locally with a snapshot build:
+# go run github.com/goreleaser/goreleaser/v2@v2.18.2 release --snapshot --clean
+version: 2
+
+project_name: crew
+
+builds:
+  - main: ./cmd/crew
+    binary: crew
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin] # no Windows: internal/proc needs Unix process groups
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    # The v-prefixed tag, so crew --version prints crew vX.Y.Z.
+    ldflags: ["-s -w -X main.version={{ .Tag }}"]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# No version in the names: releases/latest/download/<name> is then a stable
+# URL for the install command in the README.
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# The release notes: the commits since the last tag, grouped by their
+# conventional-commit type. Docs, tests, CI and chores stay out.
+changelog:
+  sort: asc
+  abbrev: -1 # no commit hash: each title ends with its pull request
+  filters:
+    exclude:
+      - "^(docs|test|ci|chore)(\\(.+\\))?!?:"
+  groups:
+    - title: Features
+      regexp: "^feat(\\(.+\\))?!?:"
+      order: 0
+    - title: Fixes
+      regexp: "^fix(\\(.+\\))?!?:"
+      order: 1
+    - title: Other changes
+      order: 999
+
+release:
+  name_template: "{{ .Tag }}"
+  make_latest: true
+  # The tag is only local: GitHub creates it at the built commit when the
+  # release is published.
+  target_commitish: "{{ .Commit }}"

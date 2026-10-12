@@ -1,0 +1,8 @@
+# Grype's configuration for the grype job in .github/workflows/security.yml.
+# It holds only ignore rules. Each names a vulnerability id and a package,
+# with the reason the finding stays open. Never ignore by fix state, by
+# location, through exclude or only-fixed: each would also drop the matches
+# on malware advisories, which have no fixed version. A malware match is
+# never ignored: the package is removed instead. No fail-on-severity either:
+# grype would then exit non-zero on findings, which the job reads as an error.
+ignore: []

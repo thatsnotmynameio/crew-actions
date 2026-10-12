@@ -1,0 +1,327 @@
+# golangci-lint v2 (v2.14.0 in CI; locally: go run
+# github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run).
+# depguard enforces the package layering of the engine plan (KTD17): imports
+# point inward, and only the TUI imports Bubble Tea, Lip Gloss and Bubbles.
+version: "2"
+
+linters:
+  # Every linter is on unless it is listed under disable with the reason it
+  # is off: a rule earns its place by finding things we would fix. The version
+  # is pinned (v2.14.0), so a release cannot switch new linters on unseen.
+  default: all
+  disable:
+    # cyclop measures the same cyclomatic complexity, matched to Lizard's CCN.
+    - gocyclo
+    # Whitespace style (blank lines around blocks and before returns). gofmt
+    # already owns layout; these findings never made the code clearer.
+    - wsl
+    - wsl_v5
+    - nlreturn
+    # Go's zero values are deliberate: requiring every struct field to be set
+    # would undo them and add noise to every literal.
+    - exhaustruct
+    - exhaustruct_v5
+    # Short names in short scopes are idiomatic Go (i, err, ok, tc).
+    - varnamelen
+    # `if err := f(); err != nil` scopes err to its check, the idiomatic form.
+    - noinlineerr
+    # Tests isolate git with t.Setenv (GIT_CONFIG_GLOBAL), which t.Parallel
+    # forbids, and the whole suite runs in seconds.
+    - paralleltest
+    # Ports and adapters: factories and adapters return port interfaces
+    # (port.Tracker, port.Session, core.Input) by design.
+    - ireturn
+    # Struct tags mirror formats crew does not own: Claude's stream-json, gh's
+    # JSON and the snake_case keys of .crew/config.yaml.
+    - tagliatelle
+    # Tests are white-box on purpose: the core's reducer and the adapters'
+    # scripted runners are tested from inside their packages.
+    - testpackage
+    # Errors carry their context where they are made; sentinels exist only
+    # where a caller branches on them (internal/port). Wrapping every message
+    # in a static error adds a type nobody checks.
+    - err113
+    # crew is English-only and shows the boss times in their local zone on
+    # purpose; this linter is for internationalised code.
+    - gosmopolitan
+    # Deprecated in favour of gomodguard_v2, which default: all already runs.
+    - gomodguard
+  settings:
+    revive:
+      enable-default-rules: true
+      rules:
+        - name: argument-limit
+          arguments: [8]
+        # Non-comment, non-blank lines.
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
+    exhaustive:
+      # A switch with a default branch already handles every other value.
+      default-signifies-exhaustive: true
+    gochecksumtype:
+      # A switch over a sealed interface (//sumtype:decl) names every case:
+      # a default branch does not cover the ones it leaves out.
+      default-signifies-exhaustive: false
+      # A case may name a sealed sub-family, such as the run inputs among
+      # the inputs, and covers every variant of it.
+      include-shared-interfaces: true
+    wrapcheck:
+      # crew's own packages already wrap with context where the error is made;
+      # only errors from third-party packages need context added here.
+      ignore-package-globs:
+        - github.com/thatsnotmynameio/crew/*
+    dupl:
+      # Tokens a repeated fragment must reach to count as duplication.
+      threshold: 100
+    cyclop:
+      max-complexity: 15
+    gocognit:
+      min-complexity: 15
+    funlen:
+      # Non-comment lines, not statements.
+      lines: 50
+      statements: -1
+      ignore-comments: true
+    nestif:
+      min-complexity: 4
+    lll:
+      line-length: 120
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    depguard:
+      rules:
+        domain:
+          files:
+            - "**/internal/crew/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal
+              desc: the domain holds the rule run's rules and imports nothing of crew's
+        fileline:
+          files:
+            - "**/internal/fileline/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal
+              desc: fileline imports only the standard library
+        port:
+          files:
+            - "**/internal/port/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/core
+              desc: ports import only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: ports import only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: ports import only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: ports import only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: ports import only the domain
+        core:
+          files:
+            - "**/internal/core/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/port
+              desc: the core orchestrates rule runs and imports only the domain; the engine translates port results
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: the core orchestrates rule runs and imports only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: the core orchestrates rule runs and imports only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: the core orchestrates rule runs and imports only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/proc
+              desc: the core orchestrates rule runs and imports only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: the core orchestrates rule runs and imports only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/registry
+              desc: the core orchestrates rule runs and imports only the domain
+            - pkg: github.com/thatsnotmynameio/crew/internal/app
+              desc: the core orchestrates rule runs and imports only the domain
+        engine:
+          files:
+            - "**/internal/engine/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: the engine never imports an adapter
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: the engine never imports a UI package
+        adapters:
+          files:
+            - "**/internal/adapter/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/core
+              desc: adapters import the domain, the ports and proc only
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: adapters import the domain, the ports and proc only
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: adapters import the domain, the ports and proc only
+        adapter-code:
+          files:
+            - "**/internal/adapter/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: adapters never import each other
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: adapters get their section through port.Decode, not config
+        bots:
+          files:
+            - "**/internal/bots/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/core
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/port
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/registry
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/app
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: bots import only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: bots import only the standard library and proc
+        captain:
+          files:
+            - "**/internal/captain/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/core
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/registry
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/app
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/proc
+              desc: the captain imports only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/bots
+              desc: the captain imports only the domain and the ports
+        function:
+          files:
+            - "**/internal/function/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/core
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/registry
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/app
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/proc
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/bots
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/captain
+              desc: the functions import only the domain and the ports
+            - pkg: github.com/thatsnotmynameio/crew/internal/fileline
+              desc: the functions import only the domain and the ports
+        bots-users:
+          files:
+            - "!**/cmd/crew/**"
+            - "!**/internal/bots/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/bots
+              desc: only cmd/crew uses bots; nothing in the engine sees them
+        upgrade:
+          files:
+            - "**/internal/upgrade/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/adapter
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/app
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/bots
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/captain
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/config
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/core
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/crew
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/engine
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/fake
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/fileline
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/function
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/port
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/registry
+              desc: upgrade imports only the standard library and proc
+            - pkg: github.com/thatsnotmynameio/crew/internal/ui
+              desc: upgrade imports only the standard library and proc
+        upgrade-users:
+          files:
+            - "!**/cmd/crew/**"
+            - "!**/internal/upgrade/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/upgrade
+              desc: only cmd/crew uses upgrade, for crew upgrade
+        fakes:
+          files:
+            - "!$test"
+            - "!**/internal/fake/**"
+          deny:
+            - pkg: github.com/thatsnotmynameio/crew/internal/fake
+              desc: the fakes are for tests only
+        charm:
+          files:
+            - "!**/internal/ui/tui/**"
+          deny:
+            - pkg: charm.land/bubbletea
+              desc: only the TUI imports bubbletea
+            - pkg: charm.land/lipgloss
+              desc: only the TUI imports lipgloss
+            - pkg: charm.land/bubbles
+              desc: only the TUI imports bubbles
+
+  exclusions:
+    presets:
+      # Only known false positives: unchecked Close/Print-style errors in the
+      # standard library. (common-false-positives is left out: it turns gosec's
+      # subprocess and file-path rules off everywhere, not only where a
+      # finding is justified.)
+      - std-error-handling
+    rules:
+      # Tests repeat literal inputs and expectations so each case reads alone.
+      - path: _test\.go
+        linters: [goconst]
+      # Test fixtures are package-level values shared by the cases of a file.
+      - path: _test\.go
+        linters: [gochecknoglobals]
+      # Table-driven tests repeat their case shape on purpose.
+      - path: _test\.go
+        linters: [dupl]
+      # Tests read fixtures from testdata, run git in temporary repositories
+      # and write files in t.TempDir(): paths and commands come from the test.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G(204|304|306)"
+
+formatters:
+  enable:
+    - gofmt

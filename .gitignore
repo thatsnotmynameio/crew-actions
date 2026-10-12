@@ -1,0 +1,33 @@
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Agents' local state (the shared instructions in .agents/ and .claude/ are committed)
+.claude/settings.local.json
+.claude/autoharness/
+.claude/worktrees/
+.remember/
+
+# The crew binary built at the root (go build ./cmd/crew)
+/crew
+
+# GoReleaser's output (a local snapshot build)
+/dist/
+
+# Coverage profile (go test -coverprofile)
+coverage.out
+.context/compound-engineering/
+
+# The parts /cw-split-brainstorm and /cw-split-ce-plan write for an issue, read by the step after them
+/docs/splitting/
+
+# Local settings, such as a boss's own .crew/config.local.yaml
+*.local*

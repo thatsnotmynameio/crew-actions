@@ -1,0 +1,8 @@
+# CodeQL's configuration for security.yml's codeql jobs, read from the
+# pull request's own tree, so a change here applies to that pull request's run.
+# security-extended, not security-and-quality: golangci-lint already owns the
+# quality findings, with every linter on.
+name: crew
+
+queries:
+  - uses: security-extended

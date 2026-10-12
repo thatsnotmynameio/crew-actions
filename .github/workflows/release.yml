@@ -1,0 +1,75 @@
+# Started by hand on main: releases the commit it was started on as the
+# version VERSION names there, tag vX.Y.Z and a GitHub release whose archives,
+# and the crew binary inside each one, carry a signed build-provenance
+# attestation. Merging a pull request, a version bump included, publishes
+# nothing.
+# A run started on another branch is skipped. The run fails when its tag
+# already exists, or when GoReleaser finds the tag is not semantic. GoReleaser (.goreleaser.yaml) then builds crew for macOS and
+# Linux and publishes the release with the archives and checksums.txt, with
+# notes made from the commits since the last tag; GitHub creates the tag at
+# the built commit. actions/attest then attests the archives and the binaries,
+# through GitHub's artifact attestations.
+# A run that fails before GoReleaser publishes is started again. One that
+# fails after it, the attestation included, leaves a published release and
+# its tag: delete both, then start again.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+# One release at a time; a run never cancels another
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # the release and its assets
+      id-token: write # the OIDC token Sigstore certifies the attestation with
+      attestations: write # stores the attestation
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the release rule reads the v* tags
+          persist-credentials: false
+      # No module cache: the binaries released are built only from what this
+      # run downloads, never from a cache another workflow could have written.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Local only: GoReleaser reads the version from it, and GitHub creates
+      # the tag when the release is published. Fails when the tag exists: the
+      # checkout fetched every tag.
+      - name: Tag the release locally
+        run: git tag "v$(cat VERSION)"
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      # SLSA build provenance for each archive and for the crew inside it, so
+      # that an installed crew can be verified too. Each pattern must match a
+      # file: the action fails on one that matches none.
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/crew_*/crew
+      # What GoReleaser produced, to see why a run failed.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: dist
+          path: dist
+          overwrite: true
+          retention-days: 7
