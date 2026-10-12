@@ -1,0 +1,3 @@
+# crew's local files when it runs on this repository (config.yaml stays committed)
+logs/
+worktrees/
