@@ -152,25 +152,39 @@ func TestCreateMakesThePrivateLayout(t *testing.T) {
 }
 
 func TestTheSameChunkAppendedAtOnceIsHeldOnce(t *testing.T) {
-	d, path := newDir(t)
-	create(t, d)
+	// Without the per-file lock two plain goroutines rarely meet between
+	// the Stat and the Write, so each attempt starts eight appends at once
+	// and fifty attempts run, enough to fail in one run without the lock.
+	d, _ := newDir(t)
 	const chunk = "0123456789"
-	var wg sync.WaitGroup
-	held := make([]int64, 2)
-	errs := make([]error, 2)
-	for i := range held {
-		wg.Go(func() {
-			held[i], errs[i] = d.Append(attempt, position, 0, []byte(chunk))
-		})
-	}
-	wg.Wait()
-	for i := range held {
-		if errs[i] != nil || held[i] != 10 {
-			t.Errorf("Append %d = %d, %v, want 10, nil", i, held[i], errs[i])
+	for a := range model.AttemptID(50) {
+		if err := d.Create(a, position); err != nil {
+			t.Fatalf("Create: %v", err)
 		}
-	}
-	if got := content(t, path); got != chunk {
-		t.Errorf("file holds %q, want %q", got, chunk)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		held := make([]int64, 8)
+		errs := make([]error, 8)
+		for i := range held {
+			wg.Go(func() {
+				<-start
+				held[i], errs[i] = d.Append(a, position, 0, []byte(chunk))
+			})
+		}
+		close(start)
+		wg.Wait()
+		for i := range held {
+			if errs[i] != nil || held[i] != 10 {
+				t.Errorf("attempt %d: Append %d = %d, %v, want 10, nil", a, i, held[i], errs[i])
+			}
+		}
+		got, err := d.Read(a, position, 0, 100)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if string(got) != chunk {
+			t.Errorf("attempt %d: Read = %q, want %q", a, got, chunk)
+		}
 	}
 }
 
