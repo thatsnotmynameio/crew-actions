@@ -1,0 +1,27 @@
+# sqlc generates queries/ from queries.sql, checked against the migrations.
+# It runs from its release binary, v1.31.1, since its build needs cgo
+# (docs/architecture.md, section 6), and the generated code is committed.
+# From the repository root:
+#   sqlc generate --file internal/store/postgres/sqlc.yaml
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations/
+    queries: queries.sql
+    gen:
+      go:
+        package: queries
+        out: queries
+        sql_package: pgx/v5
+        # Each method takes the connection or the transaction it runs on,
+        # which the store takes from the context.
+        emit_methods_with_db_argument: true
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
