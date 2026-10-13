@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -42,8 +43,11 @@ func New(t *testing.T) string {
 		t.Skipf("%s is unset, so the tests that need Postgres skip", databaseURLEnv)
 	}
 	ctx := t.Context()
-	template, err := ensureTemplate(ctx, server)
+	template, err := templateName()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureTemplate(ctx, server, template); err != nil {
 		t.Fatalf("make the template database: %v", err)
 	}
 	// A random name, so tests in other binaries never pick it.
@@ -67,43 +71,50 @@ func New(t *testing.T) string {
 	return u
 }
 
-// ensureTemplate returns the name of the template database for the
-// store's migrations on server, and makes it when it is absent. It holds
-// an advisory lock until every connection to the template is closed, as
+// ensureTemplate makes the template database name for the store's
+// migrations on server, unless a finished one is there. It holds an
+// advisory lock until every connection to the template is closed, as
 // copying a database needs.
-func ensureTemplate(ctx context.Context, server string) (string, error) {
-	name, err := templateName()
-	if err != nil {
-		return "", err
-	}
+//
+// A template is finished once it is marked as one, which happens only
+// after every migration ran. A database of that name left unmarked, by a
+// test binary that died while making it, is dropped and made again.
+func ensureTemplate(ctx context.Context, server, name string) error {
 	conn, err := pgx.Connect(ctx, server)
 	if err != nil {
-		return "", fmt.Errorf("connect to Postgres: %w", err)
+		return fmt.Errorf("connect to Postgres: %w", err)
 	}
 	// Closing the connection releases the lock, after migrate has closed
 	// its connections to the template.
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(templateLock)); err != nil {
-		return "", fmt.Errorf("lock the template: %w", err)
+		return fmt.Errorf("lock the template: %w", err)
 	}
-	var exists bool
-	if err := conn.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)", name).Scan(&exists); err != nil {
-		return "", fmt.Errorf("look the template up: %w", err)
-	}
-	if exists {
-		return name, nil
+	var finished bool
+	err = conn.QueryRow(ctx, "SELECT datistemplate FROM pg_database WHERE datname = $1", name).Scan(&finished)
+	switch {
+	case err == nil && finished:
+		return nil
+	case err == nil:
+		if _, err := conn.Exec(ctx, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
+			return fmt.Errorf("drop unfinished template %s: %w", name, err)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("look the template up: %w", err)
 	}
 	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
-		return "", fmt.Errorf("create database %s: %w", name, err)
+		return fmt.Errorf("create database %s: %w", name, err)
 	}
 	if err := migrate(ctx, server, name); err != nil {
 		if _, dropErr := conn.Exec(context.WithoutCancel(ctx), "DROP DATABASE "+name+" WITH (FORCE)"); dropErr != nil {
-			return "", fmt.Errorf("%w, and drop database %s: %w", err, name, dropErr)
+			return fmt.Errorf("%w, and drop database %s: %w", err, name, dropErr)
 		}
-		return "", err
+		return err
 	}
-	return name, nil
+	if _, err := conn.Exec(ctx, "ALTER DATABASE "+name+" WITH IS_TEMPLATE true"); err != nil {
+		return fmt.Errorf("mark database %s as a template: %w", name, err)
+	}
+	return nil
 }
 
 // migrate applies the store's migrations to the database name on server,

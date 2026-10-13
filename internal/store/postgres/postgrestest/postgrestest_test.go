@@ -1,6 +1,8 @@
 package postgrestest
 
 import (
+	"context"
+	"crypto/rand"
 	"errors"
 	"net/url"
 	"os"
@@ -79,6 +81,50 @@ func TestNewDropsTheDatabaseAtCleanup(t *testing.T) {
 	}
 }
 
+func TestEnsureTemplateRebuildsAnUnfinishedTemplate(t *testing.T) {
+	server := os.Getenv(databaseURLEnv)
+	if server == "" {
+		t.Skipf("%s is unset, so the tests that need Postgres skip", databaseURLEnv)
+	}
+	// A name of its own, so the template other tests copy is left alone.
+	name := "crew_actions_template_test_" + strings.ToLower(rand.Text())
+	// What a test binary that died while migrating the template leaves.
+	if err := exec(t.Context(), server, "CREATE DATABASE "+name); err != nil {
+		t.Fatalf("create database %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		if err := exec(context.Background(), server, "ALTER DATABASE "+name+" WITH IS_TEMPLATE false"); err != nil {
+			t.Errorf("unmark database %s: %v", name, err)
+		}
+		if err := exec(context.Background(), server, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop database %s: %v", name, err)
+		}
+	})
+	if err := ensureTemplate(t.Context(), server, name); err != nil {
+		t.Fatalf("ensureTemplate() error = %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), server)
+	if err != nil {
+		t.Fatalf("connect to Postgres: %v", err)
+	}
+	defer func() { _ = conn.Close(t.Context()) }()
+	var finished bool
+	if err := conn.QueryRow(t.Context(),
+		"SELECT datistemplate FROM pg_database WHERE datname = $1", name).Scan(&finished); err != nil {
+		t.Fatalf("look the template up: %v", err)
+	}
+	if !finished {
+		t.Errorf("database %s is not marked as a template", name)
+	}
+	u, err := withDatabase(server, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := exec(t.Context(), u, "SELECT id FROM database_identity"); err != nil {
+		t.Errorf("the rebuilt template has no database_identity: %v", err)
+	}
+}
+
 // unreachable is the URL of a server that is not there.
 const unreachable = "postgres://postgres@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=5"
 
@@ -86,8 +132,7 @@ func TestHelpersReportFailures(t *testing.T) {
 	tests := map[string]func(t *testing.T) error{
 		"an unreachable server's template": func(t *testing.T) error {
 			t.Helper()
-			_, err := ensureTemplate(t.Context(), unreachable)
-			return err
+			return ensureTemplate(t.Context(), unreachable, "test")
 		},
 		"an unreachable server's statement": func(t *testing.T) error {
 			t.Helper()
