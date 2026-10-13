@@ -92,3 +92,55 @@ func TestParseRepositoryRefuses(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRepositoryFlag(t *testing.T) {
+	cases := map[string]Repository{
+		"gitlab.com/group/sub/repo": {Host: "gitlab.com", Organization: "group/sub", Name: "repo"},
+		"github.com/org/repo":       {Host: "github.com", Organization: "org", Name: "repo"},
+		"GitHub.com/Org/Repo":       {Host: "github.com", Organization: "Org", Name: "Repo"},
+		"https://user:token@gitlab.com/group/sub/repo.git": {
+			Host: "gitlab.com", Organization: "group/sub", Name: "repo",
+		},
+		"git@github.com:org/repo.git": {Host: "github.com", Organization: "org", Name: "repo"},
+	}
+	for in, want := range cases {
+		got, err := ParseRepositoryFlag(in)
+		if err != nil {
+			t.Errorf("ParseRepositoryFlag(%q) error = %v, want nil", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("ParseRepositoryFlag(%q) = %+v, want %+v", in, got, want)
+		}
+	}
+}
+
+func TestParseRepositoryFlagRefuses(t *testing.T) {
+	refused := []string{
+		"host/repo",
+		"/host/org/repo",
+		"host//repo",
+		"host/org/repo/",
+		"host/org/../repo",
+		"host/org/re po",
+		"host/org/repo\n",
+		"",
+		"/srv/repo",
+		"token@github.com/org/repo",
+		"user:" + secret + "@github.com/org/repo",
+		"github.com/user:" + secret + "@org/repo",
+		"github.com/org/" + secret + "@repo",
+		"https://user:" + secret + "@host/repo.git",
+		"https://user:token@gitlab.com/group//repo.git",
+	}
+	for _, in := range refused {
+		got, err := ParseRepositoryFlag(in)
+		if err == nil {
+			t.Errorf("ParseRepositoryFlag(%q) = %+v, want an error", in, got)
+			continue
+		}
+		if msg := err.Error(); strings.Contains(msg, secret) || strings.Contains(msg, "tok") {
+			t.Errorf("ParseRepositoryFlag(%q) error = %q, repeats the credential", in, msg)
+		}
+	}
+}

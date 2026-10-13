@@ -58,6 +58,40 @@ func ParseRepository(s string) (Repository, error) {
 	}, nil
 }
 
+// ParseRepositoryFlag returns the identity a --repo value names: a URL,
+// which ParseRepository reads, or host/organization/repository, where the
+// organization may have several levels. Like ParseRepository's, its errors
+// never repeat s.
+func ParseRepositoryFlag(s string) (Repository, error) {
+	beforePath, _, _ := strings.Cut(s, "/")
+	if strings.Contains(s, "://") || strings.Contains(beforePath, ":") {
+		return ParseRepository(s)
+	}
+	if hasSpaceOrControl(s) {
+		return Repository{}, errors.New("--repo contains whitespace or a control character")
+	}
+	parts := strings.Split(s, "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return Repository{}, errors.New("--repo has an empty, '.' or '..' part")
+		}
+		// '@' or ':' in a part is what is left of a user and a credential.
+		if strings.ContainsAny(part, "@:") {
+			return Repository{}, errors.New("--repo has '@' or ':' in a part")
+		}
+	}
+	host, segments := parts[0], parts[1:]
+	last := len(segments) - 1
+	if last < 1 {
+		return Repository{}, errors.New("--repo is neither a URL nor host/organization/repository")
+	}
+	return Repository{
+		Host:         strings.ToLower(host),
+		Organization: strings.Join(segments[:last], "/"),
+		Name:         segments[last],
+	}, nil
+}
+
 // String returns host/organization/name.
 func (r Repository) String() string {
 	return r.Host + "/" + r.Organization + "/" + r.Name
