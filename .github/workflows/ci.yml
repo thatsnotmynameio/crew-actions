@@ -1,6 +1,7 @@
-# Every pull request and each push to main: actionlint over the workflows,
-# the Go module on Linux and macOS, and a snapshot of the release build. A new
-# job that must pass before a merge also goes into the "checks" ruleset.
+# Every pull request and each push to main: the Go module on Linux and macOS,
+# and a snapshot of the release build. A new job that must pass before a merge
+# also goes into the "checks" ruleset. actionlint runs on every pull request
+# through the organization's ruleset, as the check "tnmn.io: actionlint".
 name: CI
 
 on:
@@ -19,22 +20,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # actionlint at the version go.mod's tool directive pins, with the runner's
-  # shellcheck on every run: script.
-  actionlint:
-    name: actionlint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: actionlint
-        run: go tool actionlint -color
-
   # The Go module on each system crew ships for: tidy go.mod, formatting, vet,
   # lint (including the layering rules in .golangci.yml), tests with the race
   # detector and coverage, and known vulnerabilities. Linux alone checks the
