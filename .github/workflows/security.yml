@@ -19,6 +19,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Daily as well: grype's analysis of main then shows an advisory published
+  # since the last push within a day, and a pull request stops seeing it as
+  # one it adds.
+  schedule:
+    - cron: "41 5 * * *"
 
 permissions: {}
 
@@ -114,7 +119,8 @@ jobs:
           sarif_file: ${{ runner.temp }}/codeql-results
           category: /language:${{ matrix.language }}
 
-  # Grype's analysis of main, through the organization's workflow
+  # Grype's analysis of main, on each push and daily, through the
+  # organization's workflow
   # (thatsnotmynameio/github-actions' grype.yml) under the category "grype":
   # vulnerable dependencies and malicious packages in every manifest, with the
   # ignore rules of .grype.yaml. On a pull request the organization's ruleset
@@ -124,7 +130,7 @@ jobs:
   # alerts open on main.
   grype:
     name: grype
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       security-events: write # uploads the results to code scanning
@@ -145,7 +151,7 @@ jobs:
   # The category "zizmor" is a contract, as for grype above.
   zizmor:
     name: zizmor
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       security-events: write # uploads the results to code scanning
