@@ -10,9 +10,9 @@
 # the pull_request event started, a fork's included, with the read-only token.
 # No paths filter: these checks will be required, and a required check that
 # a path filter skips stays pending.
-# Each job checks out the pull request's merge commit, which is the commit its
-# results are filed under, so configuration files come from the merged tree
-# and a change to them applies to the pull request that makes it.
+# The CodeQL jobs check out a pull request's head commit and file their results
+# under it, so configuration files come from the pull request and a change to
+# them applies to the pull request that makes it.
 name: Security
 
 on:
@@ -52,8 +52,13 @@ jobs:
           - language: actions
             build-mode: none
     steps:
+      # On a pull request, its head commit, not the test merge commit: GitHub
+      # makes a new merge commit when it rechecks the pull request (a ruleset
+      # change or a merge attempt), and code scanning then waits for results
+      # on the new one. The head commit stays until the next push.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       # Before CodeQL's init, so its extractor uses this Go.
       - if: matrix.language == 'go'
@@ -118,6 +123,10 @@ jobs:
         with:
           sarif_file: ${{ runner.temp }}/codeql-results
           category: /language:${{ matrix.language }}
+          # On a pull request, filed under its head commit; elsewhere, under the
+          # run's ref and commit.
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || '' }}
+          sha: ${{ github.event.pull_request.head.sha || '' }}
 
   # Grype's analysis of main, on each push and daily, through the
   # organization's workflow
