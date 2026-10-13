@@ -146,7 +146,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-grype-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@802fdb1ebc353919a700b16ccc062ad16f198d28 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main
 
   # zizmor's analysis of main, through the organization's workflow
   # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor":
@@ -167,4 +167,4 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-zizmor-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@802fdb1ebc353919a700b16ccc062ad16f198d28 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main

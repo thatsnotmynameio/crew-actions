@@ -1,7 +1,8 @@
 # What a release builds and publishes: crew for macOS and Linux on amd64 and
 # arm64, one tar.gz per platform, and checksums.txt. The Release workflow
-# (.github/workflows/release.yml) runs it, attests the assets and says when a
-# release happens.
+# (.github/workflows/release.yml) says when a release happens; the
+# organization's workflow it calls (thatsnotmynameio/github-actions'
+# go-release.yml) runs it and attests the assets.
 # Try it locally with a snapshot build:
 # go run github.com/goreleaser/goreleaser/v2@v2.18.2 release --snapshot --clean
 version: 2
