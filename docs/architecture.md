@@ -164,8 +164,8 @@ Exact versions live in `go.mod`, the CI workflows and the compose file, and Depe
 | **pgx v5** (`github.com/jackc/pgx/v5`) | The driver and the connection pool. | The standard Postgres driver in Go, with native LISTEN/NOTIFY. |
 | **sqlc** | Generates typed Go from plain SQL queries, checked against the schema. | Queries stay SQL; mistakes show at generation, not at run time. |
 | **goose** (`github.com/pressly/goose/v3`) | Runs the migrations: plain `.sql` files embedded in the binary, at startup. | Widely used; reads `embed.FS`; holds a Postgres advisory lock while it migrates, so several engines can start at once. |
-| **testcontainers-go**, with its Postgres module | Starts a real Postgres for the tests from the test itself. | `go test` needs only Docker: no database URL to set up, the same locally and in CI. |
-| **pgtestdb** | Gives each test its own database, created from a migrated template. | Store tests run in parallel, each on a clean database, without migrating each time. |
+| **The compose file** (`compose.yaml`) | Starts PostgreSQL 18 for the store's tests, locally and in CI's Linux job; the tests read its URL from `CREW_ACTIONS_TEST_DATABASE_URL` (D19). | One server for every test run, reached the same way in both places, with no test-only dependency in `go.mod`. |
+| **pgtestdb** | Gives each test its own database, created from a migrated template, on the server `CREW_ACTIONS_TEST_DATABASE_URL` names. | Store tests run in parallel, each on a clean database, without migrating each time. |
 | **connect-go v2** (`connectrpc.com/connect/v2`) | The protocol over HTTP for `transport/connect`. | Works over HTTP/1.1 and HTTP/2, so it crosses proxies; the protos stay the contract. |
 | **protobuf-go** and **buf** | The protocol's messages, and the tool that lints and generates them. | protobuf-go is the official runtime; buf replaces protoc. |
 | **OpenTelemetry Go**, with **autoexport** and the **otelslog** bridge | Traces, metrics and logs, exported over OTLP. | The standard; exporters chosen by the standard `OTEL_*` variables. |
@@ -176,8 +176,8 @@ What the choices bring with them:
 - **sqlc covers ordinary queries, not everything.** LISTEN, the advisory locks around the engine's loops and the claim loop are written by hand over pgx. Session advisory locks and LISTEN each hold one dedicated connection for as long as they last. sqlc's own build needs cgo, so it runs from its release binary rather than the `tool` directive of `go.mod`, and the generated code is committed.
 - **buf is not a `go tool`.** Its documentation advises against it; it is installed at a pinned version. The protoc plugins (`protoc-gen-go`, `protoc-gen-connect-go`) do go through the `tool` directive.
 - **otelslog and the OTLP log exporter are still experimental** upstream, unlike the trace and metric SDKs. A Dependabot bump can change their API.
-- **Docker is needed for the store's tests.** GitHub's macOS runners have none, so the tests that need a database skip when Docker is missing: they run in the Linux job and skip in the macOS one.
-- **The Postgres 18 image keeps its data under `/var/lib/postgresql`,** not `/var/lib/postgresql/data` as before; a compose volume mounts there.
+- **The store's tests need `CREW_ACTIONS_TEST_DATABASE_URL`.** Without it they skip and name the variable. Only CI's Linux job sets it, since GitHub's macOS runners have no Docker to run the compose file: the tests run in the Linux job and skip in the macOS one.
+- **The Postgres 18 image keeps its data under `/var/lib/postgresql`,** not `/var/lib/postgresql/data` as before; the compose file mounts the tests' data there.
 
 Not taken:
 
@@ -185,6 +185,7 @@ Not taken:
 - **lib/pq:** `database/sql` has no API for notifications.
 - **grpc-go as the transport:** it needs HTTP/2 end to end, which proxies often break. **twirp:** no release since 2022.
 - **Automatic instrumentation (otelpgx, otelconnect):** the engine names and opens its own spans (D13).
+- **testcontainers-go:** about 50 test-only dependencies in `go.mod`, two of them under licenses `dependency-review` rejects (D19).
 
 ---
 
@@ -321,3 +322,4 @@ A later change adds a new entry that names the one it supersedes.
 - D16. **Child processes through a copy of crew's `internal/proc`** (slice -1). Another repository cannot import crew's `internal/`, and a module shared by both would tie their releases. The copy arrives with slice 0 and keeps crew's copyright notice, since the two licenses name different holders.
 - D17. **A `crew-actions` binary, and `crew actions …` as a dispatch** (slice -1). crew runs `crew-actions` from the `PATH` with the rest of the arguments, so neither project requires the other. The dispatch is a small change in crew, made when there is something to dispatch to.
 - D18. **One architecture document, with its decision log inside** (slice -1). One file is what a person or an agent landing in the repository reads; the exploration stays as history and is no longer maintained.
+- D19. **The store's tests read their database URL from `CREW_ACTIONS_TEST_DATABASE_URL`** (slice 0). They start no container themselves: `compose.yaml` starts the server, locally and in CI's Linux job. When the variable is unset or empty, they skip with a message naming it; when it is set and its server cannot be reached, the run fails rather than skips, so a lost database never passes silently. testcontainers-go took `go.mod` from 16 indirect dependencies to about 70, all for tests, and `dependency-review` rejected the licenses of two of them. Supersedes D11.
