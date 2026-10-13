@@ -34,6 +34,95 @@ func (q *Queries) AssignWorkflow(ctx context.Context, db DBTX, arg AssignWorkflo
 	return i, err
 }
 
+const failRunningSteps = `-- name: FailRunningSteps :exec
+UPDATE steps
+SET state = 'finished', outcome = 'failure', finished_at = now()
+WHERE attempt_id = $1 AND state = 'running'
+`
+
+func (q *Queries) FailRunningSteps(ctx context.Context, db DBTX, attemptID int64) error {
+	_, err := db.Exec(ctx, failRunningSteps, attemptID)
+	return err
+}
+
+const finishAttempt = `-- name: FinishAttempt :exec
+UPDATE attempts
+SET outcome = $1::text, finished_at = now()
+WHERE id = $2
+`
+
+type FinishAttemptParams struct {
+	Outcome string
+	ID      int64
+}
+
+func (q *Queries) FinishAttempt(ctx context.Context, db DBTX, arg FinishAttemptParams) error {
+	_, err := db.Exec(ctx, finishAttempt, arg.Outcome, arg.ID)
+	return err
+}
+
+const finishBuild = `-- name: FinishBuild :exec
+UPDATE builds
+SET state = 'finished', outcome = $1::text, finished_at = now()
+WHERE id = $2
+`
+
+type FinishBuildParams struct {
+	Outcome string
+	ID      int64
+}
+
+func (q *Queries) FinishBuild(ctx context.Context, db DBTX, arg FinishBuildParams) error {
+	_, err := db.Exec(ctx, finishBuild, arg.Outcome, arg.ID)
+	return err
+}
+
+const finishStep = `-- name: FinishStep :execrows
+UPDATE steps
+SET state = 'finished', outcome = $1::text, exit_status = $2, finished_at = now()
+WHERE attempt_id = $3 AND position = $4 AND state = 'running'
+`
+
+type FinishStepParams struct {
+	Outcome    string
+	ExitStatus *int32
+	AttemptID  int64
+	Position   int32
+}
+
+func (q *Queries) FinishStep(ctx context.Context, db DBTX, arg FinishStepParams) (int64, error) {
+	result, err := db.Exec(ctx, finishStep,
+		arg.Outcome,
+		arg.ExitStatus,
+		arg.AttemptID,
+		arg.Position,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const finishWorkflow = `-- name: FinishWorkflow :execrows
+UPDATE workflows
+SET state = 'finished', outcome = $1::text, version = version + 1, finished_at = now()
+WHERE workflows.id = $2::bigint AND workflows.state = 'running'
+  AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.workflow_id = workflows.id AND a.finished_at IS NULL)
+`
+
+type FinishWorkflowParams struct {
+	Outcome string
+	ID      int64
+}
+
+func (q *Queries) FinishWorkflow(ctx context.Context, db DBTX, arg FinishWorkflowParams) (int64, error) {
+	result, err := db.Exec(ctx, finishWorkflow, arg.Outcome, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getBuild = `-- name: GetBuild :one
 SELECT id, host, organization, repository, state, outcome, created_at, finished_at
 FROM builds
@@ -56,6 +145,32 @@ func (q *Queries) GetBuild(ctx context.Context, db DBTX, id int64) (Build, error
 	return i, err
 }
 
+const insertAttempt = `-- name: InsertAttempt :one
+
+INSERT INTO attempts (workflow_id, host, organization, repository, number, accepted_version)
+SELECT w.id, w.host, w.organization, w.repository,
+       (SELECT coalesce(max(a.number), 0) + 1 FROM attempts a WHERE a.workflow_id = w.id),
+       $1::bigint
+FROM workflows w
+WHERE w.id = $2::bigint
+RETURNING id
+`
+
+type InsertAttemptParams struct {
+	AcceptedVersion int64
+	WorkflowID      int64
+}
+
+// An attempt and its steps copy their parent's identity. A workflow's
+// attempts are numbered from 1, and accepting locks the workflow's row,
+// so two attempts never take one number.
+func (q *Queries) InsertAttempt(ctx context.Context, db DBTX, arg InsertAttemptParams) (int64, error) {
+	row := db.QueryRow(ctx, insertAttempt, arg.AcceptedVersion, arg.WorkflowID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertBuild = `-- name: InsertBuild :one
 INSERT INTO builds (host, organization, repository, state)
 VALUES ($1, $2, $3, 'running')
@@ -73,6 +188,24 @@ func (q *Queries) InsertBuild(ctx context.Context, db DBTX, arg InsertBuildParam
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertStep = `-- name: InsertStep :exec
+INSERT INTO steps (attempt_id, host, organization, repository, position, name, state)
+SELECT a.id, a.host, a.organization, a.repository, $1::integer, $2::text, 'pending'
+FROM attempts a
+WHERE a.id = $3::bigint
+`
+
+type InsertStepParams struct {
+	Position  int32
+	Name      string
+	AttemptID int64
+}
+
+func (q *Queries) InsertStep(ctx context.Context, db DBTX, arg InsertStepParams) error {
+	_, err := db.Exec(ctx, insertStep, arg.Position, arg.Name, arg.AttemptID)
+	return err
 }
 
 const insertWorkflow = `-- name: InsertWorkflow :exec
@@ -250,6 +383,33 @@ func (q *Queries) ListWorkflows(ctx context.Context, db DBTX, buildID int64) ([]
 	return items, nil
 }
 
+const lockAttempt = `-- name: LockAttempt :one
+
+SELECT finished_at FROM attempts WHERE id = $1 FOR UPDATE
+`
+
+// LockAttempt locks the attempt until its transaction ends, so its steps
+// change only while it is open, and never while it finishes.
+func (q *Queries) LockAttempt(ctx context.Context, db DBTX, id int64) (*time.Time, error) {
+	row := db.QueryRow(ctx, lockAttempt, id)
+	var finished_at *time.Time
+	err := row.Scan(&finished_at)
+	return finished_at, err
+}
+
+const lockBuild = `-- name: LockBuild :one
+
+SELECT state FROM builds WHERE id = $1 FOR UPDATE
+`
+
+// LockBuild locks the build until its transaction ends.
+func (q *Queries) LockBuild(ctx context.Context, db DBTX, id int64) (string, error) {
+	row := db.QueryRow(ctx, lockBuild, id)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
 const pendingWorkflows = `-- name: PendingWorkflows :many
 
 SELECT id, version, name, build_id, created_at
@@ -294,6 +454,124 @@ func (q *Queries) PendingWorkflows(ctx context.Context, db DBTX, n int64) ([]Pen
 		return nil, err
 	}
 	return items, nil
+}
+
+const skipPendingSteps = `-- name: SkipPendingSteps :exec
+
+UPDATE steps
+SET state = 'skipped', finished_at = now()
+WHERE attempt_id = $1 AND state = 'pending'
+`
+
+// Failing an attempt closes its leftover steps: a pending step is skipped,
+// and a running one finishes with failure and no exit status.
+func (q *Queries) SkipPendingSteps(ctx context.Context, db DBTX, attemptID int64) error {
+	_, err := db.Exec(ctx, skipPendingSteps, attemptID)
+	return err
+}
+
+const skipStep = `-- name: SkipStep :execrows
+UPDATE steps
+SET state = 'skipped', finished_at = now()
+WHERE attempt_id = $1 AND position = $2 AND state = 'pending'
+`
+
+type SkipStepParams struct {
+	AttemptID int64
+	Position  int32
+}
+
+func (q *Queries) SkipStep(ctx context.Context, db DBTX, arg SkipStepParams) (int64, error) {
+	result, err := db.Exec(ctx, skipStep, arg.AttemptID, arg.Position)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const startStep = `-- name: StartStep :execrows
+UPDATE steps
+SET state = 'running', started_at = now()
+WHERE attempt_id = $1 AND position = $2 AND state = 'pending'
+`
+
+type StartStepParams struct {
+	AttemptID int64
+	Position  int32
+}
+
+func (q *Queries) StartStep(ctx context.Context, db DBTX, arg StartStepParams) (int64, error) {
+	result, err := db.Exec(ctx, startStep, arg.AttemptID, arg.Position)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const startWorkflow = `-- name: StartWorkflow :execrows
+
+UPDATE workflows
+SET state = 'running', version = version + 1
+WHERE id = $1 AND state = 'assigned' AND version = $2
+`
+
+type StartWorkflowParams struct {
+	ID      int64
+	Version int64
+}
+
+// Accepting a workflow moves it from assigned to running at the version
+// its hand-out returned.
+func (q *Queries) StartWorkflow(ctx context.Context, db DBTX, arg StartWorkflowParams) (int64, error) {
+	result, err := db.Exec(ctx, startWorkflow, arg.ID, arg.Version)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const stepExists = `-- name: StepExists :one
+SELECT EXISTS (SELECT 1 FROM steps WHERE attempt_id = $1 AND position = $2)
+`
+
+type StepExistsParams struct {
+	AttemptID int64
+	Position  int32
+}
+
+func (q *Queries) StepExists(ctx context.Context, db DBTX, arg StepExistsParams) (bool, error) {
+	row := db.QueryRow(ctx, stepExists, arg.AttemptID, arg.Position)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const stepsBlockSuccess = `-- name: StepsBlockSuccess :one
+
+SELECT EXISTS (
+    SELECT 1 FROM steps
+    WHERE attempt_id = $1 AND (state NOT IN ('finished', 'skipped') OR outcome = 'failure')
+)
+`
+
+// An attempt succeeds only once each of its steps has finished with
+// success or been skipped.
+func (q *Queries) StepsBlockSuccess(ctx context.Context, db DBTX, attemptID int64) (bool, error) {
+	row := db.QueryRow(ctx, stepsBlockSuccess, attemptID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const unfinishedWorkflows = `-- name: UnfinishedWorkflows :one
+SELECT EXISTS (SELECT 1 FROM workflows WHERE build_id = $1 AND state <> 'finished')
+`
+
+func (q *Queries) UnfinishedWorkflows(ctx context.Context, db DBTX, buildID int64) (bool, error) {
+	row := db.QueryRow(ctx, unfinishedWorkflows, buildID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const workflowExists = `-- name: WorkflowExists :one
