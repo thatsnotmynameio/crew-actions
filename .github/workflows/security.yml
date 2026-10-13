@@ -1,18 +1,20 @@
 # Every pull request and each push to main: the security analyses, published
 # to GitHub code scanning. The push gives code scanning the analysis of main
-# that a pull request's alerts are compared against. CodeQL analyses Go and
-# GitHub Actions. Grype, which scans the repository's dependencies, and zizmor,
-# which audits the workflows' security, run here only on a push to main,
-# through the organization's workflows: on a pull request the organization's
-# rulesets run them, as the checks "tnmn.io: grype" and "tnmn.io: zizmor", and
+# that a pull request's alerts are compared against. CodeQL analyses GitHub
+# Actions here on every run. CodeQL's analysis of Go, Grype, which scans the
+# repository's dependencies, and zizmor, which audits the workflows' security,
+# run here only on a push to main, through the organization's workflows: on a
+# pull request the organization's rulesets run them, as the checks
+# "tnmn.io: codeql (go)", "tnmn.io: grype" and "tnmn.io: zizmor", and
 # "tnmn.io: dependency-review" checks the dependencies a pull request adds.
 # No job holds a secret: code scanning accepts an upload from any run that
 # the pull_request event started, a fork's included, with the read-only token.
 # No paths filter: these checks will be required, and a required check that
 # a path filter skips stays pending.
-# The CodeQL jobs check out a pull request's head commit and file their results
-# under it, so configuration files come from the pull request and a change to
-# them applies to the pull request that makes it.
+# The codeql (actions) job checks out a pull request's head commit and files
+# its results under it, so its configuration file comes from the pull request
+# and a change to it applies to the pull request that makes it. The
+# organization's workflows read theirs from the base commit.
 name: Security
 
 on:
@@ -28,9 +30,9 @@ on:
 permissions: {}
 
 jobs:
-  # CodeQL's advanced setup, with the security-extended suite
-  # (.github/codeql/codeql-config.yml). Its alerts do not fail the job. The job
-  # fails on a build or analysis error, and then uploads nothing.
+  # CodeQL's advanced setup for the workflows, with the security-extended
+  # suite (.github/codeql/codeql-config.yml). Its alerts do not fail the job.
+  # The job fails on an analysis error, and then uploads nothing.
   codeql:
     name: codeql (${{ matrix.language }})
     runs-on: ubuntu-latest
@@ -47,8 +49,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - language: go
-            build-mode: manual
           - language: actions
             build-mode: none
     steps:
@@ -60,65 +60,16 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      # Before CodeQL's init, so its extractor uses this Go.
-      - if: matrix.language == 'go'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
-      # The Go extractor sees only the go commands this step runs. go build
-      # extracts no test file, and the extract_tests option does not apply to a
-      # traced build: only a traced go test does, and only with build flags,
-      # since the extractor hands them to go list (-run makes it fail and skip
-      # every test). So the step compiles the test binaries with go test -c,
-      # which runs no test. go test -c -o dir/ names a binary after its
-      # package's last path element (cmd/crew and internal/crew are both
-      # crew.test), so packages that share one go in separate batches.
-      - name: build
-        if: matrix.language == 'go'
-        shell: bash
-        run: |
-          out="$RUNNER_TEMP/codeql-tests"
-          mkdir -p "$out"
-          go build ./...
-          go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... |
-            awk -F/ 'NF { print ++seen[$NF], $0 }' > "$out/packages"
-          while read -r batch; do
-            mapfile -t packages < <(awk -v batch="$batch" '$1 == batch { print $2 }' "$out/packages")
-            go test -c -o "$out/$batch/" "${packages[@]}"
-          done < <(cut -d' ' -f1 "$out/packages" | sort -un)
-      - id: analyze
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: /language:${{ matrix.language }}
           upload: never
           output: ${{ runner.temp }}/codeql-results
-      # A database without the tests would upload as a
-      # complete analysis and mark their alerts fixed: a failed build of the
-      # tests does not fail the extraction. So the job checks the Go database's
-      # source archive, which lists every file extracted, before it uploads.
-      - name: extracted files
-        if: matrix.language == 'go'
-        shell: bash
-        env:
-          DB_LOCATIONS: ${{ steps.analyze.outputs.db-locations }}
-        run: |
-          database="$(jq -r .go <<< "$DB_LOCATIONS")"
-          unzip -Z1 "$database/src.zip" | awk -v root="${GITHUB_WORKSPACE#/}/" '
-            index($0, root) != 1 || !/\.go$/ { next }
-            { path = substr($0, length(root) + 1) }
-            path ~ /_test\.go$/ { tests++ }
-            END {
-              printf "test files: %d\n", tests
-              if (!tests) {
-                print "::error::The Go database is missing the test files."
-                exit 1
-              }
-            }'
       - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: ${{ runner.temp }}/codeql-results
@@ -127,6 +78,28 @@ jobs:
           # run's ref and commit.
           ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || '' }}
           sha: ${{ github.event.pull_request.head.sha || '' }}
+
+  # CodeQL's analysis of the Go module, test files included, on each push and
+  # daily, through the organization's workflow
+  # (thatsnotmynameio/github-actions' codeql-go.yml) under the category
+  # /language:go, with the security-extended suite of
+  # .github/codeql/codeql-config.yml. On a pull request the organization's
+  # ruleset runs the same workflow, as the check "tnmn.io: codeql (go)", with
+  # .github/codeql/codeql-config.yml from the base commit: a change to it
+  # applies to Go once it merges. Its alerts do not fail the job; a build or
+  # analysis error does, and then it uploads nothing.
+  # The category /language:go is a contract, as for grype below: it is the
+  # one the Go analysis has always used, so main's alerts carry over.
+  codeql-go:
+    name: codeql (go)
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write # uploads the results to code scanning
+    concurrency:
+      group: ${{ github.workflow }}-codeql-go-${{ github.sha }}
+      cancel-in-progress: false
+    uses: thatsnotmynameio/github-actions/.github/workflows/codeql-go.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main
 
   # Grype's analysis of main, on each push and daily, through the
   # organization's workflow
@@ -146,7 +119,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-grype-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@802fdb1ebc353919a700b16ccc062ad16f198d28 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main
 
   # zizmor's analysis of main, through the organization's workflow
   # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor":
@@ -167,4 +140,4 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-zizmor-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@802fdb1ebc353919a700b16ccc062ad16f198d28 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main

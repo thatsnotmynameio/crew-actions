@@ -1,124 +1,35 @@
-# Every pull request and each push to main: the Go module on Linux and macOS,
-# and a snapshot of the release build. A new job that must pass before a merge
-# also goes into the "checks" ruleset. actionlint runs on every pull request
-# through the organization's ruleset, as the check "tnmn.io: actionlint".
+# Each push to main: the Go module's checks, through the organization's
+# workflow (thatsnotmynameio/github-actions' go.yml). On Linux and macOS it
+# checks that go mod tidy changes nothing, then runs gofmt, vet, golangci-lint
+# (including the layering rules in .golangci.yml), the tests with the race
+# detector and coverage, and govulncheck. Linux alone starts the store's test
+# database, the Compose service .github/go.yml names, so on macOS the store's
+# tests skip; Linux also checks the coverage floor of .github/go.yml and
+# uploads lint's findings to code scanning. A snapshot of the release build
+# from .goreleaser.yaml follows. The push gives code scanning the analysis of
+# main that a pull request's golangci-lint alerts are compared against.
+# On a pull request the organization's ruleset runs the same workflow, as the
+# check "tnmn.io: go", with .github/go.yml and .golangci.yml from the base
+# commit: a change to them applies once it merges. actionlint runs on every
+# pull request the same way, as the check "tnmn.io: actionlint".
 name: CI
 
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
-# A pull request's newer run replaces the older one. Each main commit gets a
-# group of its own and is never cancelled.
+# Each commit gets a group of its own and is never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
-  # The Go module on each system crew ships for: tidy go.mod, formatting, vet,
-  # lint (including the layering rules in .golangci.yml), tests with the race
-  # detector and coverage, and known vulnerabilities. Linux alone checks the
-  # coverage floor (the action runs in Docker, which only Linux runners have)
-  # and uploads lint's findings, so code scanning gets them once. Linux alone
-  # also starts the store's test database, from Docker too, so on macOS the
-  # store's tests skip. It holds no secret: on a Dependabot pull request the
-  # updated module runs here.
   go:
-    name: go (${{ matrix.os }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    name: go
     permissions:
       contents: read
       security-events: write # uploads golangci-lint's findings to code scanning
-    strategy:
-      # One system's failure does not cancel the other's run.
-      fail-fast: false
-      matrix:
-        include:
-          - os: linux
-            runner: ubuntu-latest
-          - os: macos
-            runner: macos-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      # go mod tidy changes nothing.
-      - name: go mod tidy
-        run: |
-          go mod tidy
-          git diff --exit-code
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l cmd internal)"
-          if [ -n "$unformatted" ]; then
-            echo "Not gofmt-formatted:" >&2
-            echo "$unformatted" >&2
-            exit 1
-          fi
-      - name: go vet
-        run: go vet ./...
-      # The findings also go to a SARIF file, which code scanning shows in the
-      # Security tab and on the pull request's lines.
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.14.0
-          args: --output.text.path=stdout --output.sarif.path=golangci-lint.sarif
-      # After a failed lint too, so its findings show; not when lint never ran.
-      - if: ${{ !cancelled() && matrix.os == 'linux' && hashFiles('golangci-lint.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
-        with:
-          sarif_file: golangci-lint.sarif
-          category: golangci-lint
-      # A step, not services:, which cannot be limited to the Linux leg and
-      # holds an image Dependabot does not move; compose.yaml's tag is the
-      # one local runs use. go test reads the URL from the environment.
-      - name: test database
-        if: ${{ !cancelled() && matrix.os == 'linux' }}
-        run: |
-          docker compose up --wait --wait-timeout 60 test-postgres
-          echo "CREW_ACTIONS_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/crew_actions_test?sslmode=disable" >> "$GITHUB_ENV"
-      - name: go test
-        if: ${{ !cancelled() }}
-        run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
-      - name: coverage floor
-        if: matrix.os == 'linux'
-        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
-        with:
-          config: ./.testcoverage.yml
-      - name: govulncheck
-        run: go tool govulncheck ./...
-
-  # The release build from .goreleaser.yaml, as a snapshot: every platform's
-  # binary, archives and checksums.txt in dist/, published nowhere. A change
-  # that breaks the release build fails here, not when the release runs.
-  snapshot:
-    name: snapshot
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0 # the snapshot's version is the latest v* tag
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: v2.18.2
-          args: check
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: v2.18.2
-          args: release --snapshot --clean
+    uses: thatsnotmynameio/github-actions/.github/workflows/go.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main
