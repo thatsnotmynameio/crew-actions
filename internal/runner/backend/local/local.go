@@ -86,6 +86,12 @@ func (w *workspace) Run(ctx context.Context, commands []string, out io.Writer) (
 	case err := <-exited:
 		return status(err)
 	case <-ctx.Done():
+		// A step that exited before the cancellation was seen keeps its result.
+		select {
+		case err := <-exited:
+			return status(err)
+		default:
+		}
 		grace := w.backend.Grace
 		if grace == 0 {
 			grace = defaultGrace
