@@ -299,7 +299,7 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	_, _ = w.buf.Write(p) // a bytes.Buffer's Write returns no error
-	if bytes.Contains(w.buf.Bytes(), []byte("\n")) {
+	if bytes.IndexByte(p, '\n') >= 0 {
 		w.once.Do(func() { close(w.line) })
 	}
 	return len(p), nil

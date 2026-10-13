@@ -112,24 +112,31 @@ func (w *workspace) Destroy() error {
 	if err := os.RemoveAll(w.dir); err == nil {
 		return nil
 	}
-	// The walk stays inside the workspace, whatever symlinks a step left. A
-	// directory that cannot be read is skipped: the second removal reports
-	// what is left.
-	if root, err := os.OpenRoot(w.dir); err == nil {
-		_ = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr == nil && d.IsDir() {
-				if info, err := d.Info(); err == nil {
-					_ = root.Chmod(path, info.Mode().Perm()|ownerWrite)
-				}
-			}
-			return nil
-		})
-		_ = root.Close()
-	}
+	makeDirsWritable(w.dir)
 	if err := os.RemoveAll(w.dir); err != nil {
 		return fmt.Errorf("remove the workspace: %w", err)
 	}
 	return nil
+}
+
+// makeDirsWritable gives owner write permission to every directory of the
+// tree at dir. The walk stays inside dir, whatever symlinks a step left. A
+// directory that cannot be read is skipped: the removal after it reports
+// what is left.
+func makeDirsWritable(dir string) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	_ = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr == nil && d.IsDir() {
+			if info, err := d.Info(); err == nil {
+				_ = root.Chmod(path, info.Mode().Perm()|ownerWrite)
+			}
+		}
+		return nil
+	})
 }
 
 // script is the shell script of a step's commands: each command followed by
