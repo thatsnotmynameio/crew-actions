@@ -100,25 +100,32 @@ func TestStartAttemptNumbersAfterTheLast(t *testing.T) {
 
 func TestStartAttemptConflicts(t *testing.T) {
 	tests := map[string]struct {
-		// assign hands the workflow out first when true.
-		assign bool
+		// prepare creates the build whose workflow StartAttempt is called on.
+		prepare func(t *testing.T, s *Store) model.BuildID
 		// version is the version StartAttempt is called with, relative to
 		// the workflow's.
 		version int64
 	}{
-		"a stale version":    {assign: true, version: -1},
-		"a pending workflow": {assign: false, version: 0},
+		"a stale version": {
+			prepare: func(t *testing.T, s *Store) model.BuildID {
+				t.Helper()
+				id, _, _ := assigned(t, s)
+				return id
+			},
+			version: -1,
+		},
+		"a pending workflow": {
+			prepare: func(t *testing.T, s *Store) model.BuildID {
+				t.Helper()
+				return createBuild(t, s, "test")
+			},
+			version: 0,
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			s := newStore(t)
-			id := createBuild(t, s, "test")
-			if tt.assign {
-				w := getBuild(t, s, id).Workflows[0]
-				if _, _, err := s.AssignWorkflow(t.Context(), w.ID, w.Version); err != nil {
-					t.Fatalf("AssignWorkflow() error = %v", err)
-				}
-			}
+			id := tt.prepare(t, s)
 			before := getBuild(t, s, id)
 			w := before.Workflows[0]
 			_, err := s.StartAttempt(t.Context(), w.ID, w.Version+tt.version, []string{"test"})

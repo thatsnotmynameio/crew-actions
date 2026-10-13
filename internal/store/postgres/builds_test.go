@@ -344,27 +344,22 @@ func TestBuildFailsAtTheSecondStep(t *testing.T) {
 }
 
 func TestFinishBuildConflicts(t *testing.T) {
-	tests := map[string]func(t *testing.T, s *Store, id model.BuildID){
-		"an unfinished workflow": func(*testing.T, *Store, model.BuildID) {},
-		"already finished": func(t *testing.T, s *Store, id model.BuildID) {
+	tests := map[string]func(t *testing.T, s *Store) model.BuildID{
+		"an unfinished workflow": func(t *testing.T, s *Store) model.BuildID {
 			t.Helper()
-			w := getBuild(t, s, id).Workflows[0]
-			version, _, err := s.AssignWorkflow(t.Context(), w.ID, w.Version)
-			if err != nil {
-				t.Fatalf("AssignWorkflow() error = %v", err)
-			}
-			a, err := s.StartAttempt(t.Context(), w.ID, version, nil)
-			if err != nil {
-				t.Fatalf("StartAttempt() error = %v", err)
-			}
-			runToTheEnd(t, s, id, w.ID, a)
+			return createBuild(t, s, "test")
+		},
+		"already finished": func(t *testing.T, s *Store) model.BuildID {
+			t.Helper()
+			id, w, a := started(t, s)
+			runToTheEnd(t, s, id, w, a)
+			return id
 		},
 	}
 	for name, prepare := range tests {
 		t.Run(name, func(t *testing.T) {
 			s := newStore(t)
-			id := createBuild(t, s, "test")
-			prepare(t, s, id)
+			id := prepare(t, s)
 			before := getBuild(t, s, id)
 			if err := s.FinishBuild(t.Context(), id, model.OutcomeFailure); !errors.Is(err, model.ErrConflict) {
 				t.Errorf("FinishBuild() error = %v, want %v", err, model.ErrConflict)
