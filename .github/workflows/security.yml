@@ -1,9 +1,10 @@
 # Every pull request and each push to main: the security analyses, published
 # to GitHub code scanning. The push gives code scanning the analysis of main
 # that a pull request's alerts are compared against. CodeQL analyses Go and
-# GitHub Actions; Grype scans the repository's dependencies, dependency
-# review checks the dependencies a pull request adds, and zizmor audits the
-# workflows' security.
+# GitHub Actions; Grype scans the repository's dependencies, and dependency
+# review checks the dependencies a pull request adds. zizmor, which audits the
+# workflows' security, runs here only on a push to main: on a pull request the
+# organization's ruleset runs it, as the check "tnmn.io: zizmor".
 # No job holds a secret: code scanning accepts an upload from any run that
 # the pull_request event started, a fork's included, with the read-only token.
 # No paths filter: these checks will be required, and a required check that
@@ -190,36 +191,23 @@ jobs:
           # A comment would need pull-requests: write.
           comment-summary-in-pr: never
 
-  # zizmor audits the workflows, the composite actions and Dependabot's
-  # configuration for security issues, with its online audits, through the
-  # read-only token. The action runs zizmor's container image, pinned by digest
-  # in the action, so Dependabot bumps both together, and uploads the SARIF
-  # under the category "zizmor". zizmor finds .github/zizmor.yml in the
-  # checkout, so a rule turned off there is off in the pull request that does
-  # it. Its alerts do not fail the job: in SARIF mode zizmor exits 0 on
-  # findings. The job fails on an error, such as a malformed
-  # .github/zizmor.yml or no input to audit, and then uploads nothing.
-  # A file zizmor cannot parse is not an error: zizmor skips it with a
-  # warning and uploads the results of the other files, and the action has no
-  # input for --strict-collection. The required actionlint check is what
-  # rejects broken workflow YAML.
-  # The job's name and the category "zizmor" are contracts, as for grype above.
+  # zizmor's analysis of main, through the organization's workflow
+  # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor":
+  # code scanning compares each pull request's zizmor alerts with it. On a pull
+  # request the organization's ruleset runs the same workflow, as the check
+  # "tnmn.io: zizmor", with .github/zizmor.yml from the base commit: a rule
+  # turned off there applies once it merges, never to the pull request that
+  # does it. The workflow audits the workflows, the composite actions and
+  # Dependabot's configuration with zizmor's online audits, and never fails on
+  # a finding.
+  # The category "zizmor" is a contract, as for grype above.
   zizmor:
     name: zizmor
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    if: github.event_name == 'push'
     permissions:
       contents: read
       security-events: write # uploads the results to code scanning
     concurrency:
-      group: ${{ github.workflow }}-zizmor-${{ github.event_name == 'push' && github.sha || github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
-        with:
-          persona: regular
-          online-audits: true
-          advanced-security: true
+      group: ${{ github.workflow }}-zizmor-${{ github.sha }}
+      cancel-in-progress: false
+    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@772b59a78d5344ba6e6869f9a4fc02f671a87312 # main
