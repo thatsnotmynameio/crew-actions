@@ -129,7 +129,7 @@ func runStep(ctx context.Context, ws backend.Workspace, step spec.Step, out io.W
 	if err != nil {
 		r.ExitStatus = -1
 		r.Err = err
-		r.Stopped = ctx.Err() != nil && errors.Is(err, ctx.Err())
+		r.Stopped = errors.Is(err, ctx.Err())
 	}
 	return r
 }
