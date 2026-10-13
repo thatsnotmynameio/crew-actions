@@ -58,16 +58,47 @@ func (s *Store) AssignWorkflow(ctx context.Context, id model.WorkflowID, version
 			return fmt.Errorf("update the workflow: %w", err)
 		}
 		exists, err := s.q.WorkflowExists(ctx, tx, int64(id))
-		if err != nil {
-			return fmt.Errorf("look the workflow up: %w", err)
-		}
-		if exists {
-			return model.ErrConflict
-		}
-		return model.ErrNotFound
+		return refusal(exists, err, "workflow")
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("assign workflow %d at version %d: %w", id, version, err)
 	}
 	return row.Version, row.Definition, nil
+}
+
+// FinishWorkflow moves the workflow id from running to finished with
+// outcome, bumps its version and records when. It refuses while the
+// workflow has an open attempt, so the engine finishes the attempt first,
+// in the same transaction. A workflow that is not running, or has an open
+// attempt, gives model.ErrConflict, and an unknown one model.ErrNotFound.
+func (s *Store) FinishWorkflow(ctx context.Context, id model.WorkflowID, outcome model.Outcome) error {
+	err := s.InTx(ctx, func(ctx context.Context) error {
+		tx := txFrom(ctx)
+		n, err := s.q.FinishWorkflow(ctx, tx, queries.FinishWorkflowParams{ID: int64(id), Outcome: string(outcome)})
+		if err != nil {
+			return fmt.Errorf("update the workflow: %w", err)
+		}
+		if n > 0 {
+			return nil
+		}
+		exists, err := s.q.WorkflowExists(ctx, tx, int64(id))
+		return refusal(exists, err, "workflow")
+	})
+	if err != nil {
+		return fmt.Errorf("finish workflow %d with %s: %w", id, outcome, err)
+	}
+	return nil
+}
+
+// refusal returns the error of a transition that changed no row, given
+// whether the row exists and the error of looking it up: model.ErrConflict
+// for a row in another state, and model.ErrNotFound for none.
+func refusal(exists bool, err error, what string) error {
+	if err != nil {
+		return fmt.Errorf("look the %s up: %w", what, err)
+	}
+	if exists {
+		return model.ErrConflict
+	}
+	return model.ErrNotFound
 }

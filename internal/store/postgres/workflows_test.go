@@ -147,3 +147,39 @@ func TestAssignWorkflowUnknown(t *testing.T) {
 		t.Errorf("AssignWorkflow(7) error = %v, want %v", err, model.ErrNotFound)
 	}
 }
+
+func TestFinishWorkflowConflicts(t *testing.T) {
+	tests := map[string]func(t *testing.T, s *Store) model.BuildID{
+		"an assigned workflow": func(t *testing.T, s *Store) model.BuildID {
+			t.Helper()
+			id, _, _ := assigned(t, s)
+			return id
+		},
+		"an open attempt": func(t *testing.T, s *Store) model.BuildID {
+			t.Helper()
+			id, _, _ := started(t, s, "test")
+			return id
+		},
+	}
+	for name, prepare := range tests {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			id := prepare(t, s)
+			before := getBuild(t, s, id)
+			err := s.FinishWorkflow(t.Context(), before.Workflows[0].ID, model.OutcomeSuccess)
+			if !errors.Is(err, model.ErrConflict) {
+				t.Errorf("FinishWorkflow() error = %v, want %v", err, model.ErrConflict)
+			}
+			if after := getBuild(t, s, id); !reflect.DeepEqual(after, before) {
+				t.Errorf("build after the conflict = %+v, want %+v", after, before)
+			}
+		})
+	}
+}
+
+func TestFinishWorkflowUnknown(t *testing.T) {
+	s := newStore(t)
+	if err := s.FinishWorkflow(t.Context(), 7, model.OutcomeSuccess); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("FinishWorkflow(7) error = %v, want %v", err, model.ErrNotFound)
+	}
+}

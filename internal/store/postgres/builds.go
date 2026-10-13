@@ -54,6 +54,42 @@ func (s *Store) CreateBuild(
 	return model.BuildID(id), nil
 }
 
+// FinishBuild moves the build id from running to finished with outcome,
+// which the engine decides, and records when. It locks the build first, and
+// refuses while any of its workflows is unfinished. A build that is not
+// running, or has an unfinished workflow, gives model.ErrConflict, and an
+// unknown one model.ErrNotFound.
+func (s *Store) FinishBuild(ctx context.Context, id model.BuildID, outcome model.Outcome) error {
+	err := s.InTx(ctx, func(ctx context.Context) error {
+		tx := txFrom(ctx)
+		state, err := s.q.LockBuild(ctx, tx, int64(id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock the build: %w", err)
+		}
+		if state != string(model.BuildRunning) {
+			return model.ErrConflict
+		}
+		unfinished, err := s.q.UnfinishedWorkflows(ctx, tx, int64(id))
+		if err != nil {
+			return fmt.Errorf("read the workflows: %w", err)
+		}
+		if unfinished {
+			return model.ErrConflict
+		}
+		if err := s.q.FinishBuild(ctx, tx, queries.FinishBuildParams{ID: int64(id), Outcome: string(outcome)}); err != nil {
+			return fmt.Errorf("update the build: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("finish build %d with %s: %w", id, outcome, err)
+	}
+	return nil
+}
+
 // GetBuild returns the snapshot of the build id, with all its workflows,
 // every attempt and every attempt's steps, ordered by id, number and
 // position. An unknown id gives model.ErrNotFound.
