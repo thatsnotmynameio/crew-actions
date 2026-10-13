@@ -1,7 +1,6 @@
 package logs
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -208,7 +207,7 @@ func TestReadFromAnOffset(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Read: %v", err)
 			}
-			if !bytes.Equal(got, []byte(tc.want)) {
+			if string(got) != tc.want {
 				t.Errorf("Read(%d, %d) = %q, want %q", tc.offset, tc.limit, got, tc.want)
 			}
 		})
