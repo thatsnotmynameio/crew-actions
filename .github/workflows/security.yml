@@ -1,10 +1,11 @@
 # Every pull request and each push to main: the security analyses, published
 # to GitHub code scanning. The push gives code scanning the analysis of main
 # that a pull request's alerts are compared against. CodeQL analyses Go and
-# GitHub Actions; Grype scans the repository's dependencies, and dependency
-# review checks the dependencies a pull request adds. zizmor, which audits the
-# workflows' security, runs here only on a push to main: on a pull request the
-# organization's ruleset runs it, as the check "tnmn.io: zizmor".
+# GitHub Actions. Grype, which scans the repository's dependencies, and zizmor,
+# which audits the workflows' security, run here only on a push to main,
+# through the organization's workflows: on a pull request the organization's
+# rulesets run them, as the checks "tnmn.io: grype" and "tnmn.io: zizmor", and
+# "tnmn.io: dependency-review" checks the dependencies a pull request adds.
 # No job holds a secret: code scanning accepts an upload from any run that
 # the pull_request event started, a fork's included, with the read-only token.
 # No paths filter: these checks will be required, and a required check that
@@ -113,83 +114,24 @@ jobs:
           sarif_file: ${{ runner.temp }}/codeql-results
           category: /language:${{ matrix.language }}
 
-  # Vulnerable dependencies and malicious packages in every manifest of the
-  # checkout, with the ignore rules of .grype.yaml, through Anchore's scan
-  # action. Its alerts do not fail the job: code scanning reports the ones a
-  # pull request adds. The job fails on a tool error, and then uploads
-  # nothing.
-  # The job's name and the category "grype" are contracts: the checks ruleset
-  # requires the job by name, and the scans of main upload under the same
-  # category. A renamed job leaves a required check pending forever, and a
-  # renamed category leaves its old alerts open on main.
+  # Grype's analysis of main, through the organization's workflow
+  # (thatsnotmynameio/github-actions' grype.yml) under the category "grype":
+  # vulnerable dependencies and malicious packages in every manifest, with the
+  # ignore rules of .grype.yaml. On a pull request the organization's ruleset
+  # runs the same workflow, as the check "tnmn.io: grype", with .grype.yaml
+  # from the base commit. It never fails on a finding.
+  # The category "grype" is a contract: a renamed category leaves its old
+  # alerts open on main.
   grype:
     name: grype
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: github.event_name == 'push'
     permissions:
       contents: read
       security-events: write # uploads the results to code scanning
-    # A pull request's newer run replaces the older one. Each main commit gets
-    # a group of its own and is never cancelled.
     concurrency:
-      group: ${{ github.workflow }}-grype-${{ github.event_name == 'push' && github.sha || github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # fail-build false: grype exits non-zero only on an error. No
-      # only-fixed, so malware, which has no fixed version, stays in the
-      # results. A database grype cannot check for updates, or older than its
-      # maximum age, is an error.
-      - id: scan
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        env:
-          GRYPE_DB_REQUIRE_UPDATE_CHECK: "true"
-          GRYPE_DB_VALIDATE_AGE: "true"
-          GRYPE_CHECK_FOR_APP_UPDATE: "false"
-        with:
-          path: "."
-          config: .grype.yaml
-          fail-build: false
-          output-format: sarif
-      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}
-          category: grype
-
-  # The dependencies a pull request adds, through GitHub's dependency review:
-  # a license off the allowlist below, or a known vulnerability, fails the
-  # job. A push has nothing to compare, so it runs only on pull requests.
-  dependency-review:
-    name: dependency-review
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    concurrency:
-      group: ${{ github.workflow }}-dependency-review-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
-        with:
-          # The licenses a dependency may have. Today's dependency graph holds
-          # MIT and BSD-3-Clause, Apache-2.0 (go.yaml.in/yaml/v3, with MIT)
-          # and LicenseRef-scancode-google-patent-license-golang (Go's
-          # golang.org/x modules, with BSD-3-Clause). MIT-0, BSD-2-Clause,
-          # ISC and 0BSD are permissive licenses that ask no more of crew's
-          # MIT license than a notice. No copyleft license is on the list:
-          # adding one, or any other license, is a decision made here.
-          allow-licenses: MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, 0BSD, LicenseRef-scancode-google-patent-license-golang
-          # Every new vulnerability, whatever its severity and scope.
-          fail-on-severity: low
-          fail-on-scopes: runtime, development, unknown
-          # A comment would need pull-requests: write.
-          comment-summary-in-pr: never
+      group: ${{ github.workflow }}-grype-${{ github.sha }}
+      cancel-in-progress: false
+    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@b3eb85dec19927bd5be988c75401c29909e4676c # main
 
   # zizmor's analysis of main, through the organization's workflow
   # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor":
