@@ -200,6 +200,11 @@ func join(at, key string) string {
 	return at + "." + key
 }
 
+// index returns the path of item i in the list whose path is at.
+func index(at string, i int) string {
+	return fmt.Sprintf("%s[%d]", at, i)
+}
+
 // list returns the items of the list at key in mapping n, whose path is at,
 // and the list's path. The key must be there, and its value must be a list of
 // at least one item, each an item names.
@@ -227,13 +232,14 @@ func workflowSteps(root *yaml.Node) ([]Step, error) {
 	steps := make([]Step, 0, len(items))
 	names := make(map[string]int, len(items))
 	for i, item := range items {
-		s, nameLine, err := step(resolve(item), fmt.Sprintf("%s[%d]", at, i))
+		stepPath := index(at, i)
+		s, nameLine, err := step(resolve(item), stepPath)
 		if err != nil {
 			return nil, err
 		}
 		if first, ok := names[s.Name]; ok {
 			msg := fmt.Sprintf("duplicate step name %q, first used on line %d", s.Name, first)
-			return nil, &Error{Path: join(fmt.Sprintf("%s[%d]", at, i), "name"), Line: nameLine, Msg: msg}
+			return nil, &Error{Path: join(stepPath, "name"), Line: nameLine, Msg: msg}
 		}
 		names[s.Name] = nameLine
 		steps = append(steps, s)
@@ -263,7 +269,7 @@ func step(n *yaml.Node, at string) (Step, int, error) {
 	}
 	commands := make([]string, 0, len(items))
 	for i, item := range items {
-		command, err := checkCommand(resolve(item), fmt.Sprintf("%s[%d]", commandsPath, i))
+		command, err := checkCommand(resolve(item), index(commandsPath, i))
 		if err != nil {
 			return Step{}, 0, err
 		}
