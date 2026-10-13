@@ -9,24 +9,21 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// The harness: TestMain starts one Postgres 18 container for the package
-// and migrates its database. A test asks for a store on that database, or
-// for an empty database of its own. Without Docker, as on GitHub's macOS
-// runners, the tests that need Postgres skip.
+// The harness: TestMain migrates the database that
+// CREW_ACTIONS_TEST_DATABASE_URL names, which compose.yaml's test-postgres
+// serves locally and in CI's Linux job. A test asks for a store on that
+// database, or for an empty database of its own. Without the variable, as
+// on GitHub's macOS runners, the tests that need Postgres skip.
 
-// image is the Postgres the tests run against, by major only.
-const image = "postgres:18"
+// databaseURLEnv names the variable that holds the test database's URL.
+const databaseURLEnv = "CREW_ACTIONS_TEST_DATABASE_URL"
 
 var (
-	// databaseURL is the URL of the container's migrated database. It is
-	// empty when Docker is unavailable.
+	// databaseURL is the URL of the migrated database. It is empty when
+	// the variable is unset.
 	databaseURL string
-	// skipReason says why there is no database.
-	skipReason string
 	// databases counts the empty databases tests created, to name them.
 	databases atomic.Int64
 )
@@ -35,54 +32,20 @@ func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
 }
 
-// runTests starts and migrates Postgres when Docker is there, runs the
-// tests and returns their exit code. A container that fails to start with
-// Docker running fails the run: only a missing Docker skips.
+// runTests migrates the database the variable names, when it is set, runs
+// the tests and returns their exit code. A database that cannot be reached
+// or migrated fails the run: only an unset variable skips.
 func runTests(m *testing.M) int {
-	ctx := context.Background()
-	if err := dockerHealth(ctx); err != nil {
-		skipReason = fmt.Sprintf("Docker is unavailable, so the tests that need Postgres skip: %v", err)
+	u := os.Getenv(databaseURLEnv)
+	if u == "" {
 		return m.Run()
 	}
-	ctr, err := tcpostgres.Run(ctx, image, tcpostgres.BasicWaitStrategies())
-	defer func() {
-		if err := testcontainers.TerminateContainer(ctr); err != nil {
-			fmt.Fprintf(os.Stderr, "stop Postgres: %v\n", err)
-		}
-	}()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "start Postgres: %v\n", err)
-		return 1
-	}
-	u, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Postgres' URL: %v\n", err)
-		return 1
-	}
-	if err := migrate(ctx, u); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if err := migrate(context.Background(), u); err != nil {
+		fmt.Fprintf(os.Stderr, "migrate the database %s names: %v\n", databaseURLEnv, err)
 		return 1
 	}
 	databaseURL = u
 	return m.Run()
-}
-
-// dockerHealth returns why Docker cannot run containers, or nil. Finding
-// no Docker host panics inside testcontainers, so a panic is an answer too.
-func dockerHealth(ctx context.Context) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("%v", r)
-		}
-	}()
-	provider, err := testcontainers.ProviderDocker.GetProvider()
-	if err != nil {
-		return fmt.Errorf("find Docker: %w", err)
-	}
-	if err := provider.Health(ctx); err != nil {
-		return fmt.Errorf("check Docker: %w", err)
-	}
-	return nil
 }
 
 // migrate applies the store's migrations to the database at u.
@@ -96,17 +59,17 @@ func migrate(ctx context.Context, u string) error {
 }
 
 // requireDatabase returns the migrated database's URL, and skips the test
-// without Docker.
+// without one.
 func requireDatabase(t *testing.T) string {
 	t.Helper()
 	if databaseURL == "" {
-		t.Skip(skipReason)
+		t.Skipf("%s is unset, so the tests that need Postgres skip", databaseURLEnv)
 	}
 	return databaseURL
 }
 
 // newStore returns a store on the migrated database, with every table
-// emptied, and skips the test without Docker.
+// emptied, and skips the test without a database.
 func newStore(t *testing.T) *Store {
 	t.Helper()
 	s := open(t, requireDatabase(t))
@@ -128,7 +91,7 @@ func open(t *testing.T, u string) *Store {
 }
 
 // emptyDatabase creates a database no migration ran on, which the test's
-// end drops, and returns its URL. It skips the test without Docker.
+// end drops, and returns its URL. It skips the test without a database.
 func emptyDatabase(t *testing.T) string {
 	t.Helper()
 	admin := requireDatabase(t)
