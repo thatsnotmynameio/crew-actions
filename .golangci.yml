@@ -177,7 +177,7 @@ linters:
               desc: only store/postgres imports pgx (D7, D9)
             - pkg: github.com/pressly/goose
               desc: only store/postgres imports goose (D7, D10)
-            - pkg: github.com/thatsnotmynameio/crew-actions/internal/store/postgres/
+            - pkg: github.com/thatsnotmynameio/crew-actions/internal/store/postgres/queries
               desc: only store/postgres imports the code sqlc generates (D7, D9)
         connect-users:
           files:

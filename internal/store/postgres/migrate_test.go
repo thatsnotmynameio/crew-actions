@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"sync"
 	"testing"
@@ -174,8 +175,18 @@ func provider(t *testing.T, s *Store) *goose.Provider {
 	return p
 }
 
-// theTables are the tables the first migration creates.
-var theTables = []string{"attempts", "builds", "steps", "workflows"}
+// theTables are the tables the migrations create.
+var theTables = []string{"attempts", "builds", "database_identity", "steps", "workflows"}
+
+// migrationCount returns how many migrations the store embeds.
+func migrationCount(t *testing.T) int {
+	t.Helper()
+	names, err := fs.Glob(migrations, "migrations/*.sql")
+	if err != nil {
+		t.Fatalf("list the migrations: %v", err)
+	}
+	return len(names)
+}
 
 func TestMigrateCreatesTheTablesOnce(t *testing.T) {
 	s := open(t, emptyDatabase(t))
@@ -188,8 +199,8 @@ func TestMigrateCreatesTheTablesOnce(t *testing.T) {
 	if err := s.Migrate(t.Context()); err != nil {
 		t.Fatalf("second Migrate() error = %v", err)
 	}
-	if got := applied(t, s); got != 1 {
-		t.Errorf("applied migrations after a second Migrate = %d, want 1", got)
+	if got, want := applied(t, s), migrationCount(t); got != want {
+		t.Errorf("applied migrations after a second Migrate = %d, want %d", got, want)
 	}
 }
 
@@ -197,8 +208,8 @@ func TestMigrateConcurrently(t *testing.T) {
 	u := emptyDatabase(t)
 	stores := []*Store{open(t, u), open(t, u)}
 	// goose's version table exists, as it does for every migration after
-	// the first, so both calls find the migration pending at once. Creating
-	// it in the race would delay one call until the other is done.
+	// the first, so both calls find the migrations pending at once.
+	// Creating it in the race would delay one call until the other is done.
 	if _, err := provider(t, stores[0]).HasPending(t.Context()); err != nil {
 		t.Fatalf("HasPending() error = %v", err)
 	}
@@ -213,8 +224,8 @@ func TestMigrateConcurrently(t *testing.T) {
 			t.Errorf("Migrate() %d error = %v", i, err)
 		}
 	}
-	if got := applied(t, stores[0]); got != 1 {
-		t.Errorf("applied migrations = %d, want 1", got)
+	if got, want := applied(t, stores[0]), migrationCount(t); got != want {
+		t.Errorf("applied migrations = %d, want %d", got, want)
 	}
 	if got := tables(t, stores[0]); !slices.Equal(got, theTables) {
 		t.Errorf("tables = %v, want %v", got, theTables)

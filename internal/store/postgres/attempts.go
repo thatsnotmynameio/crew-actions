@@ -52,6 +52,47 @@ func (s *Store) StartAttempt(
 	return model.AttemptID(id), nil
 }
 
+// AttemptWorkflow returns the workflow and the build the attempt id
+// belongs to, and its number. An unknown attempt gives model.ErrNotFound.
+func (s *Store) AttemptWorkflow(
+	ctx context.Context, id model.AttemptID,
+) (model.WorkflowID, model.BuildID, int, error) {
+	var row queries.AttemptWorkflowRow
+	err := s.InTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.q.AttemptWorkflow(ctx, txFrom(ctx), int64(id))
+		return notFound(err)
+	})
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("look attempt %d up: %w", id, err)
+	}
+	return model.WorkflowID(row.WorkflowID), model.BuildID(row.BuildID), int(row.Number), nil
+}
+
+// WorkflowDefinition returns the definition of the workflow id, as
+// CreateBuild stored it. An unknown workflow gives model.ErrNotFound.
+func (s *Store) WorkflowDefinition(ctx context.Context, id model.WorkflowID) ([]byte, error) {
+	var definition []byte
+	err := s.InTx(ctx, func(ctx context.Context) error {
+		var err error
+		definition, err = s.q.WorkflowDefinition(ctx, txFrom(ctx), int64(id))
+		return notFound(err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read workflow %d's definition: %w", id, err)
+	}
+	return definition, nil
+}
+
+// notFound returns model.ErrNotFound for a lookup that found no row, and
+// otherwise err.
+func notFound(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ErrNotFound
+	}
+	return err
+}
+
 // FinishAttempt ends the open attempt id with outcome. Failure closes the
 // attempt's leftover steps: a pending step is skipped, and a running one
 // finishes with failure and no exit status. Success is refused while a

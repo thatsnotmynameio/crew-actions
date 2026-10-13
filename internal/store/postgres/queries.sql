@@ -53,6 +53,9 @@ SET state = 'assigned', version = version + 1, assigned_at = now()
 WHERE id = $1 AND state = 'pending' AND version = $2
 RETURNING version, definition;
 
+-- name: WorkflowDefinition :one
+SELECT definition FROM workflows WHERE id = $1;
+
 -- name: WorkflowExists :one
 SELECT EXISTS (SELECT 1 FROM workflows WHERE id = $1);
 
@@ -82,6 +85,12 @@ INSERT INTO steps (attempt_id, host, organization, repository, position, name, s
 SELECT a.id, a.host, a.organization, a.repository, sqlc.arg(position)::integer, sqlc.arg(name)::text, 'pending'
 FROM attempts a
 WHERE a.id = sqlc.arg(attempt_id)::bigint;
+
+-- name: AttemptWorkflow :one
+SELECT a.workflow_id, w.build_id, a.number
+FROM attempts a
+JOIN workflows w ON w.id = a.workflow_id
+WHERE a.id = $1;
 
 -- LockAttempt locks the attempt until its transaction ends, so its steps
 -- change only while it is open, and never while it finishes.
@@ -152,3 +161,6 @@ SELECT EXISTS (SELECT 1 FROM workflows WHERE build_id = $1 AND state <> 'finishe
 UPDATE builds
 SET state = 'finished', outcome = sqlc.arg(outcome)::text, finished_at = now()
 WHERE id = sqlc.arg(id);
+
+-- name: DatabaseID :one
+SELECT id::text FROM database_identity;

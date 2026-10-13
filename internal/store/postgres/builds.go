@@ -92,10 +92,13 @@ func (s *Store) FinishBuild(ctx context.Context, id model.BuildID, outcome model
 
 // GetBuild returns the snapshot of the build id, with all its workflows,
 // every attempt and every attempt's steps, ordered by id, number and
-// position. An unknown id gives model.ErrNotFound.
+// position. Alone, it reads in one read-only REPEATABLE READ transaction,
+// so its rows agree with one another; inside InTx, it reads in the
+// context's transaction. An unknown id gives model.ErrNotFound.
 func (s *Store) GetBuild(ctx context.Context, id model.BuildID) (model.Build, error) {
 	var b model.Build
-	err := s.InTx(ctx, func(ctx context.Context) error {
+	snapshot := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+	err := s.inTx(ctx, snapshot, func(ctx context.Context) error {
 		var err error
 		b, err = s.getBuild(ctx, txFrom(ctx), int64(id))
 		return err
@@ -108,7 +111,7 @@ func (s *Store) GetBuild(ctx context.Context, id model.BuildID) (model.Build, er
 
 // getBuild reads the build id on tx. It reads the children before their
 // parents: no row is deleted, so every row read has its parent in a later
-// read, even when another transaction writes in between.
+// read, even when the context's transaction lets another write in between.
 func (s *Store) getBuild(ctx context.Context, tx pgx.Tx, id int64) (model.Build, error) {
 	row, err := s.q.GetBuild(ctx, tx, id)
 	if errors.Is(err, pgx.ErrNoRows) {

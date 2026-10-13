@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"testing"
@@ -216,5 +217,44 @@ func TestFinishAttemptUnknown(t *testing.T) {
 	s := newStore(t)
 	if err := s.FinishAttempt(t.Context(), 7, model.OutcomeFailure); !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("FinishAttempt(7) error = %v, want %v", err, model.ErrNotFound)
+	}
+}
+
+func TestAttemptWorkflow(t *testing.T) {
+	s := newStore(t)
+	id, w, a := started(t, s, "test")
+	gotWorkflow, gotBuild, gotNumber, err := s.AttemptWorkflow(t.Context(), a)
+	if err != nil {
+		t.Fatalf("AttemptWorkflow() error = %v", err)
+	}
+	if gotWorkflow != w || gotBuild != id || gotNumber != 1 {
+		t.Errorf("AttemptWorkflow() = workflow %d, build %d, number %d; want %d, %d and 1",
+			gotWorkflow, gotBuild, gotNumber, w, id)
+	}
+}
+
+func TestAttemptWorkflowUnknown(t *testing.T) {
+	s := newStore(t)
+	if _, _, _, err := s.AttemptWorkflow(t.Context(), 7); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("AttemptWorkflow(7) error = %v, want %v", err, model.ErrNotFound)
+	}
+}
+
+func TestWorkflowDefinition(t *testing.T) {
+	s := newStore(t)
+	w := getBuild(t, s, createBuild(t, s, "test")).Workflows[0]
+	got, err := s.WorkflowDefinition(t.Context(), w.ID)
+	if err != nil {
+		t.Fatalf("WorkflowDefinition() error = %v", err)
+	}
+	if !bytes.Equal(got, definition) {
+		t.Errorf("WorkflowDefinition() = %q, want %q", got, definition)
+	}
+}
+
+func TestWorkflowDefinitionUnknown(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.WorkflowDefinition(t.Context(), 7); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("WorkflowDefinition(7) error = %v, want %v", err, model.ErrNotFound)
 	}
 }
