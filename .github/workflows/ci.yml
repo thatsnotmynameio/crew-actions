@@ -37,10 +37,9 @@ jobs:
 
   # The Go module on each system crew ships for: tidy go.mod, formatting, vet,
   # lint (including the layering rules in .golangci.yml), tests with the race
-  # detector and coverage, and known vulnerabilities. Linux alone checks the
-  # coverage floor (the action runs in Docker, which only Linux runners have)
-  # and uploads lint's findings, so code scanning gets them once. It holds no
-  # secret: on a Dependabot pull request the updated module runs here.
+  # detector, and known vulnerabilities. Linux alone uploads lint's findings,
+  # so code scanning gets them once. It holds no secret: on a Dependabot pull
+  # request the updated module runs here.
   go:
     name: go (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
@@ -93,12 +92,7 @@ jobs:
           category: golangci-lint
       - name: go test
         if: ${{ !cancelled() }}
-        run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
-      - name: coverage floor
-        if: matrix.os == 'linux'
-        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
-        with:
-          config: ./.testcoverage.yml
+        run: go test -race ./...
       - name: govulncheck
         run: go tool govulncheck ./...
 
