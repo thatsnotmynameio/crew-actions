@@ -39,8 +39,10 @@ jobs:
   # lint (including the layering rules in .golangci.yml), tests with the race
   # detector and coverage, and known vulnerabilities. Linux alone checks the
   # coverage floor (the action runs in Docker, which only Linux runners have)
-  # and uploads lint's findings, so code scanning gets them once. It holds no
-  # secret: on a Dependabot pull request the updated module runs here.
+  # and uploads lint's findings, so code scanning gets them once. Linux alone
+  # also starts the store's test database, from Docker too, so on macOS the
+  # store's tests skip. It holds no secret: on a Dependabot pull request the
+  # updated module runs here.
   go:
     name: go (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
@@ -91,6 +93,14 @@ jobs:
         with:
           sarif_file: golangci-lint.sarif
           category: golangci-lint
+      # A step, not services:, which cannot be limited to the Linux leg and
+      # holds an image Dependabot does not move; compose.yaml's tag is the
+      # one local runs use. go test reads the URL from the environment.
+      - name: test database
+        if: ${{ !cancelled() && matrix.os == 'linux' }}
+        run: |
+          docker compose up --wait --wait-timeout 60 test-postgres
+          echo "CREW_ACTIONS_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/crew_actions_test?sslmode=disable" >> "$GITHUB_ENV"
       - name: go test
         if: ${{ !cancelled() }}
         run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
