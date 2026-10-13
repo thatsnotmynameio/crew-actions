@@ -210,4 +210,4 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-zizmor-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@2ebbe7f8128610a86d4561b8cf5f8ec8b69f24f3 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@772b59a78d5344ba6e6869f9a4fc02f671a87312 # main
