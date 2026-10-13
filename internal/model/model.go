@@ -12,5 +12,8 @@
 //
 // An outcome is success or failure only.
 //
+// A repository is known by its host, organization and name, parsed once
+// from its URL; the URL, which can carry a credential, is not kept.
+//
 // The package does no I/O.
 package model
