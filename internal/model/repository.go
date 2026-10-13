@@ -41,6 +41,11 @@ func ParseRepository(s string) (Repository, error) {
 		if segment == "" || segment == "." || segment == ".." || hasSpaceOrControl(segment) {
 			return Repository{}, errors.New("repository URL has an empty, '.', '..' or blank path segment")
 		}
+		// No forge allows '@' or ':' in a name; in a segment they are what is
+		// left of a user and a credential that a '/' hid from the split.
+		if strings.ContainsAny(segment, "@:") {
+			return Repository{}, errors.New("repository URL has '@' or ':' in a path segment")
+		}
 	}
 	last := len(segments) - 1
 	if last == 0 {

@@ -77,6 +77,9 @@ func TestParseRepositoryRefuses(t *testing.T) {
 		"user:" + secret + "@:org/repo",
 		"user:" + secret + "@host:repo",
 		"user:" + secret + "@host:org//repo",
+		"user:se/" + secret + "@host:org/repo",
+		"https:/user:" + secret + "@host/org/repo",
+		"https://user:12/" + secret + "@host/org/repo",
 	}
 	for _, in := range refused {
 		got, err := ParseRepository(in)
