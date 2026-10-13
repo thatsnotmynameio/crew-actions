@@ -1,6 +1,6 @@
 # Weekly pull requests for new versions, one per ecosystem: the actions
-# (pinned by SHA), and crew's Go module with its tools (go.mod's tool
-# directive). A version is proposed only
+# (pinned by SHA), crew's Go module with its tools (go.mod's tool
+# directive), and the images of compose.yaml. A version is proposed only
 # once it is 7 days old, so a compromised release has time to be pulled.
 version: 2
 updates:
@@ -30,3 +30,19 @@ updates:
     # exactly the libc its go.mod names, which a driver bump raises.
     ignore:
       - dependency-name: "modernc.org/libc"
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      compose:
+        patterns: ["*"]
+    # PostgreSQL's major line is the architecture's choice (section 6), so
+    # moving to the next one is a decision, not a bump.
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]

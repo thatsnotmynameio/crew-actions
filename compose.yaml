@@ -1,0 +1,26 @@
+# PostgreSQL 18 for the store's tests only: `docker compose up --wait
+# test-postgres`, then point the tests at it with
+#   CREW_ACTIONS_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/crew_actions_test?sslmode=disable
+# The tests empty its tables and create and drop databases, so the engine's
+# local database will be another service with its own volume. The data sits
+# on a tmpfs: each start is a clean server. The project name is fixed so every
+# worktree reaches the same running server.
+name: crew-actions
+
+services:
+  test-postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: crew_actions_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    # Over TCP: while the image initialises a new cluster, its temporary
+    # server listens on the Unix socket only.
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "crew_actions_test"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
