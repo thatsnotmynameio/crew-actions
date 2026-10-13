@@ -9,6 +9,8 @@ tool (
 	golang.org/x/vuln/cmd/govulncheck
 )
 
+require go.yaml.in/yaml/v3 v3.0.5
+
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
