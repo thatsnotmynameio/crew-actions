@@ -11,3 +11,16 @@ The import rules of its section 4 are checked by `depguard` in golangci-lint. Ru
 ```sh
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run
 ```
+
+The store's tests run against the PostgreSQL 18 of [`compose.yaml`](compose.yaml) and read its URL from the environment. From the repository root:
+
+```sh
+docker compose up --detach --wait test-postgres
+export CREW_ACTIONS_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5433/crew_actions_test?sslmode=disable'
+go test ./...
+```
+
+- Without the variable the store's tests skip, and `go test` shows the skip only with `-v`.
+- Only one test run at a time should use the database for now: the tests empty its tables and create and drop databases.
+- After changing a migration or switching branches, run `docker compose down` and start the server again, so the tests begin from an empty server.
+- `docker compose down` stops the server for every worktree, since they all share it.
