@@ -18,9 +18,12 @@
 // and holds no newline or other control character, and its commands, a list
 // of at least one. A command is the text written, so `- 123` runs 123. It is
 // not blank and holds no NUL byte. An unquoted ": " makes a command a mapping
-// in YAML, which is refused: quote such a command. Any other key is refused,
-// and every refusal names the path of the value at fault, such as
-// steps[1].commands, and its line.
+// in YAML, which is refused: quote such a command. A key is plain text, or an
+// alias to plain text. A key crew actions does not run yet is refused as not
+// supported yet: a workflow's depends_on, when, queue, labels, image and
+// settings, and a step's when. Any other key is refused as unknown, and every
+// refusal names the path of the value at fault, such as steps[1].commands, and
+// its line.
 //
 // A step's commands run in one POSIX shell, /bin/sh -c, from the workspace's
 // root, so a cd or an export carries to the step's next commands but not to
@@ -85,6 +88,18 @@ func (e *KeyError) Error() string {
 	return where(e.Path, e.Line) + "unknown key"
 }
 
+// UnsupportedKeyError is a key the workflow file's format has but crew
+// actions does not run yet, such as depends_on, with its path and its line.
+type UnsupportedKeyError struct {
+	Key  string
+	Path string
+	Line int
+}
+
+func (e *UnsupportedKeyError) Error() string {
+	return where(e.Path, e.Line) + "not supported yet"
+}
+
 // where is the start of every error's message: the path and the line.
 func where(at string, line int) string {
 	if at == "" {
@@ -112,8 +127,9 @@ func NameFromPath(p string) (string, error) {
 }
 
 // Parse reads the workflow named name from content, a workflow file's
-// bytes. A refusal is a *KeyError for a key the format does not have, an
-// *Error for anything else the format refuses, or the YAML parser's error.
+// bytes. A refusal is an *UnsupportedKeyError for a key crew actions does
+// not run yet, a *KeyError for a key the format does not have, an *Error for
+// anything else the format refuses, or the YAML parser's error.
 func Parse(name string, content []byte) (Workflow, error) {
 	root, err := document(content)
 	if err != nil {
@@ -173,21 +189,31 @@ type entry struct {
 	path       string
 }
 
-// fields returns the entries of mapping n, whose path is at, by key. A key
-// not in allowed is a *KeyError, and a key given twice is an *Error.
-func fields(n *yaml.Node, at string, allowed ...string) (map[string]entry, error) {
+// fields returns the entries of mapping n, whose path is at, by key. Each key
+// is read through its alias, and one that is not plain text is an *Error. A
+// key not in allowed is an *UnsupportedKeyError when it is in unsupported, and
+// a *KeyError otherwise. A key given twice is an *Error.
+func fields(n *yaml.Node, at string, allowed, unsupported []string) (map[string]entry, error) {
 	out := make(map[string]entry, len(allowed))
 	for i := 0; i+1 < len(n.Content); i += nodesPerEntry {
 		key := n.Content[i]
-		keyPath := join(at, key.Value)
-		if !slices.Contains(allowed, key.Value) {
-			return nil, &KeyError{Key: key.Value, Path: keyPath, Line: key.Line}
+		resolved := resolve(key)
+		if resolved.Kind != yaml.ScalarNode {
+			return nil, &Error{Path: at, Line: key.Line, Msg: "a key must be plain text"}
 		}
-		if first, ok := out[key.Value]; ok {
+		name := resolved.Value
+		keyPath := join(at, name)
+		switch {
+		case slices.Contains(unsupported, name):
+			return nil, &UnsupportedKeyError{Key: name, Path: keyPath, Line: key.Line}
+		case !slices.Contains(allowed, name):
+			return nil, &KeyError{Key: name, Path: keyPath, Line: key.Line}
+		}
+		if first, ok := out[name]; ok {
 			msg := fmt.Sprintf("duplicate key, first set on line %d", first.key.Line)
 			return nil, &Error{Path: keyPath, Line: key.Line, Msg: msg}
 		}
-		out[key.Value] = entry{key: key, value: resolve(n.Content[i+1]), path: keyPath}
+		out[name] = entry{key: key, value: resolve(n.Content[i+1]), path: keyPath}
 	}
 	return out, nil
 }
@@ -221,7 +247,8 @@ func list(entries map[string]entry, n *yaml.Node, at, key, item string) ([]*yaml
 
 // workflowSteps returns the steps of the workflow whose root mapping is root.
 func workflowSteps(root *yaml.Node) ([]Step, error) {
-	entries, err := fields(root, "", "steps")
+	entries, err := fields(root, "", []string{"steps"},
+		[]string{"depends_on", "when", "queue", "labels", "image", "settings"})
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +279,7 @@ func step(n *yaml.Node, at string) (Step, int, error) {
 	if n.Kind != yaml.MappingNode {
 		return Step{}, 0, &Error{Path: at, Line: n.Line, Msg: "a step must be a mapping, with a name and commands"}
 	}
-	entries, err := fields(n, at, "name", "commands")
+	entries, err := fields(n, at, []string{"name", "commands"}, []string{"when"})
 	if err != nil {
 		return Step{}, 0, err
 	}

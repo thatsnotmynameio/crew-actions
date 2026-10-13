@@ -91,8 +91,8 @@ func TestParseRefusesKeys(t *testing.T) {
 		},
 		{
 			name:    "top-level key",
-			content: "steps:\n  - name: build\n    commands: [make]\ndepends_on: [lint]\n",
-			want:    KeyError{Key: "depends_on", Path: "depends_on", Line: 4},
+			content: "steps:\n  - name: build\n    commands: [make]\nretry: 2\n",
+			want:    KeyError{Key: "retry", Path: "retry", Line: 4},
 		},
 	}
 	for _, tc := range tests {
@@ -109,9 +109,69 @@ func TestParseRefusesKeys(t *testing.T) {
 	}
 }
 
+func TestParseRefusesUnsupportedKeys(t *testing.T) {
+	steps := "steps:\n  - name: build\n    commands: [make]\n"
+	tests := []struct {
+		name, content string
+		want          UnsupportedKeyError
+	}{
+		{
+			name:    "depends_on",
+			content: steps + "depends_on: [build]\n",
+			want:    UnsupportedKeyError{Key: "depends_on", Path: "depends_on", Line: 4},
+		},
+		{name: "when", content: steps + "when: push\n", want: UnsupportedKeyError{Key: "when", Path: "when", Line: 4}},
+		{name: "queue", content: steps + "queue: big\n", want: UnsupportedKeyError{Key: "queue", Path: "queue", Line: 4}},
+		{
+			name:    "labels",
+			content: steps + "labels: [linux]\n",
+			want:    UnsupportedKeyError{Key: "labels", Path: "labels", Line: 4},
+		},
+		{
+			name:    "image",
+			content: steps + "image: alpine\n",
+			want:    UnsupportedKeyError{Key: "image", Path: "image", Line: 4},
+		},
+		{
+			name:    "settings",
+			content: steps + "settings: {}\n",
+			want:    UnsupportedKeyError{Key: "settings", Path: "settings", Line: 4},
+		},
+		{
+			name:    "step when",
+			content: steps + "  - name: check\n    when: push\n    commands: [check]\n",
+			want:    UnsupportedKeyError{Key: "when", Path: "steps[1].when", Line: 5},
+		},
+		{
+			name:    "alias key",
+			content: "steps:\n  - name: &k depends_on\n    commands: [make]\n*k : [build]\n",
+			want:    UnsupportedKeyError{Key: "depends_on", Path: "depends_on", Line: 4},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse("w", []byte(tc.content))
+			var unsupported *UnsupportedKeyError
+			if !errors.As(err, &unsupported) {
+				t.Fatalf("Parse error = %v, want an *UnsupportedKeyError", err)
+			}
+			if *unsupported != tc.want {
+				t.Errorf("Parse error = %+v, want %+v", *unsupported, tc.want)
+			}
+		})
+	}
+}
+
 func TestKeyErrorMessage(t *testing.T) {
 	err := &KeyError{Key: "comands", Path: "steps[0].comands", Line: 3}
 	if got, want := err.Error(), "steps[0].comands (line 3): unknown key"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestUnsupportedKeyErrorMessage(t *testing.T) {
+	err := &UnsupportedKeyError{Key: "depends_on", Path: "depends_on", Line: 4}
+	if got, want := err.Error(), "depends_on (line 4): not supported yet"; got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
@@ -215,6 +275,12 @@ var refusals = []struct {
 		path:    "steps[0].name",
 		line:    4,
 		msg:     "duplicate key",
+	},
+	{
+		name:    "alias key to a mapping",
+		content: "steps:\n  - &m {name: a, commands: [x]}\n*m : y\n",
+		line:    3,
+		msg:     "plain text",
 	},
 }
 
