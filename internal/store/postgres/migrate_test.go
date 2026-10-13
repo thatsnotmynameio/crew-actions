@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 )
 
 // The SQLSTATE codes of the constraints the schema enforces.
@@ -161,6 +162,18 @@ func applied(t *testing.T, s *Store) int {
 	return n
 }
 
+// provider returns the goose provider Migrate uses, over s's pool.
+func provider(t *testing.T, s *Store) *goose.Provider {
+	t.Helper()
+	db := stdlib.OpenDBFromPool(s.pool)
+	t.Cleanup(func() { _ = db.Close() })
+	p, err := newProvider(db)
+	if err != nil {
+		t.Fatalf("newProvider() error = %v", err)
+	}
+	return p
+}
+
 // theTables are the tables the first migration creates.
 var theTables = []string{"attempts", "builds", "steps", "workflows"}
 
@@ -186,13 +199,7 @@ func TestMigrateConcurrently(t *testing.T) {
 	// goose's version table exists, as it does for every migration after
 	// the first, so both calls find the migration pending at once. Creating
 	// it in the race would delay one call until the other is done.
-	db := stdlib.OpenDBFromPool(stores[0].pool)
-	defer func() { _ = db.Close() }()
-	p, err := newProvider(db)
-	if err != nil {
-		t.Fatalf("newProvider() error = %v", err)
-	}
-	if _, err := p.HasPending(t.Context()); err != nil {
+	if _, err := provider(t, stores[0]).HasPending(t.Context()); err != nil {
 		t.Fatalf("HasPending() error = %v", err)
 	}
 	errs := make([]error, len(stores))
@@ -219,13 +226,7 @@ func TestMigrateDownAndUp(t *testing.T) {
 	if err := s.Migrate(t.Context()); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
-	db := stdlib.OpenDBFromPool(s.pool)
-	defer func() { _ = db.Close() }()
-	p, err := newProvider(db)
-	if err != nil {
-		t.Fatalf("newProvider() error = %v", err)
-	}
-	if _, err := p.DownTo(t.Context(), 0); err != nil {
+	if _, err := provider(t, s).DownTo(t.Context(), 0); err != nil {
 		t.Fatalf("DownTo(0) error = %v", err)
 	}
 	if got := tables(t, s); len(got) != 0 {

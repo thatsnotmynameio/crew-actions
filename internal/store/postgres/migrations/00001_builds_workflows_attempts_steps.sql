@@ -12,7 +12,7 @@
 -- and a finished_at exactly when it is finished (or, for a step, when it
 -- ended skipped, without an outcome).
 --
--- Outcomes stay success and failure only (D4). A reason, such as a runner
+-- Outcomes stay success and failure only (docs/architecture.md, D4). A reason, such as a runner
 -- that was lost, gets a column of its own, never another outcome.
 --
 -- Foreign keys restrict deletes.
