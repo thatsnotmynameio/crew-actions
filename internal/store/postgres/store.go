@@ -7,7 +7,8 @@
 // alone and composes with others under InTx. No signature uses a pgx type:
 // primitives take and return internal/model's types and errors.
 //
-// Only this package imports pgx and goose.
+// Only this package imports pgx, goose and the queries sqlc generates in
+// queries/ (sqlc.yaml).
 package postgres
 
 import (
@@ -16,11 +17,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/thatsnotmynameio/crew-actions/internal/store/postgres/queries"
 )
 
 // Store is the Postgres store. It is safe for concurrent use.
 type Store struct {
 	pool *pgxpool.Pool
+	// q runs the generated queries on the connection or the transaction
+	// each call names.
+	q *queries.Queries
 }
 
 // Open connects to the database at url and returns the store on it. It
@@ -34,7 +40,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("open the store: %w", err)
 	}
-	return &Store{pool: pool}, nil
+	return &Store{pool: pool, q: queries.New()}, nil
 }
 
 // Close closes the store's connections, waiting for those in use.

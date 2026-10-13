@@ -16,8 +16,11 @@ type StepID int64
 
 // Build is the snapshot of a build, with all its workflows.
 type Build struct {
-	ID    BuildID
-	State BuildState
+	ID BuildID
+	// Repository is the repository the build belongs to, which every one
+	// of its rows carries.
+	Repository Repository
+	State      BuildState
 	// Outcome is nil until the build is finished.
 	Outcome    *Outcome
 	CreatedAt  time.Time
@@ -41,6 +44,25 @@ type Workflow struct {
 	AssignedAt *time.Time
 	FinishedAt *time.Time
 	Attempts   []Attempt
+}
+
+// NewWorkflow is a workflow as a build is created with it.
+type NewWorkflow struct {
+	// Name is unique within the build.
+	Name string
+	// Definition is the workflow as the runner receives it, which the store
+	// neither parses nor checks.
+	Definition []byte
+}
+
+// Candidate is a pending workflow the hand-out can choose.
+type Candidate struct {
+	ID WorkflowID
+	// Version is the workflow's version, which handing it out compares.
+	Version   int64
+	Name      string
+	BuildID   BuildID
+	CreatedAt time.Time
 }
 
 // Attempt is the snapshot of one run of a workflow, with its steps.
