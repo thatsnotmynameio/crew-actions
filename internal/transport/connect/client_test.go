@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/thatsnotmynameio/crew-actions/internal/api"
 	"github.com/thatsnotmynameio/crew-actions/internal/model"
 	"github.com/thatsnotmynameio/crew-actions/internal/protocol"
+	"github.com/thatsnotmynameio/crew-actions/internal/transport/connect/api/apiconnect"
 )
 
 // serve starts the handler over f on a loopback HTTP server and returns
@@ -288,5 +293,69 @@ func TestFollowCutByServerIsUnavailable(t *testing.T) {
 	})
 	if !errors.Is(err, model.ErrUnavailable) {
 		t.Errorf("Follow cut by the server: error %v, want one matching model.ErrUnavailable", err)
+	}
+}
+
+func TestWrongAddressIsNotUnavailable(t *testing.T) {
+	_, _, srv := serve(t, &fake{})
+	urls := map[string]string{
+		"refused by the Host check": strings.Replace(srv.URL, "127.0.0.1", "0.0.0.0", 1),
+		"answered 404":              srv.URL + "/wrong",
+	}
+	for what, url := range urls {
+		ctx := context.Background()
+		_, err := NewEngineClient(url).Next(ctx, &protocol.NextRequest{})
+		if err == nil || errors.Is(err, model.ErrUnavailable) {
+			t.Errorf("Next %s: error %v, want one not matching model.ErrUnavailable", what, err)
+		}
+		if _, err := collect(ctx, NewBuildsClient(url)); err == nil || errors.Is(err, model.ErrUnavailable) {
+			t.Errorf("Follow %s: error %v, want one not matching model.ErrUnavailable", what, err)
+		}
+	}
+}
+
+// cancelAtEOF is an HTTP transport whose response bodies call cancel as
+// they reach their end, as a context cancelled just as the stream ends.
+type cancelAtEOF struct {
+	cancel context.CancelFunc
+}
+
+func (t cancelAtEOF) RoundTrip(req *http.Request) (*http.Response, error) {
+	res, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the client wraps it as it does any transport's
+	}
+	res.Body = cancelAtEOFBody{ReadCloser: res.Body, cancel: t.cancel}
+	return res, nil
+}
+
+// cancelAtEOFBody calls cancel when its reads reach io.EOF.
+type cancelAtEOFBody struct {
+	io.ReadCloser
+
+	cancel context.CancelFunc
+}
+
+func (b cancelAtEOFBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if errors.Is(err, io.EOF) {
+		b.cancel()
+	}
+	return n, err //nolint:wrapcheck // a body returns its reader's io.EOF as it is
+}
+
+func TestFollowCancelledAsStreamEndsEarlyReturnsContextError(t *testing.T) {
+	_, _, srv := serve(t, &fake{follow: func(_ context.Context, send func(*api.FollowResponse) error) error {
+		return send(events[0])
+	}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	httpClient := &http.Client{Transport: cancelAtEOF{cancel: cancel}}
+	builds := buildsClient{client: apiconnect.NewBuildServiceClient(
+		connect.NewClient(connecthttp.NewTransport(httpClient, srv.URL)),
+	)}
+	if _, err := collect(ctx, builds); !errors.Is(err, context.Canceled) || errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("Follow cancelled as the stream ends early: error %v, "+
+			"want context.Canceled and not model.ErrUnavailable", err)
 	}
 }
