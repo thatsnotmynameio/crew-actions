@@ -1,0 +1,16 @@
+# The settings of the organization's Go check, "tnmn.io: go"
+# (thatsnotmynameio/github-actions' .github/workflows/go.yml). The check reads
+# them from a pull request's base commit, so a change here applies once it
+# merges, never to the pull request that makes it.
+
+# The systems the tests run on: every system the module ships for.
+systems: [linux, macos]
+# The coverage floor: the least total coverage, in percent, of the statements
+# go test covers on Linux.
+coverage: 90
+# The store's tests run against compose.yaml's test database, which only the
+# Linux runners can start (macOS's have no Docker): there the tests read its
+# URL from the environment, and on macOS they skip.
+services: [test-postgres]
+env:
+  CREW_ACTIONS_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5433/crew_actions_test?sslmode=disable

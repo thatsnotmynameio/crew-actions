@@ -1,6 +1,0 @@
-# go-test-coverage's settings for CI's coverage floor (Linux's go job): the total
-# coverage of the profile `go test -coverpkg=./... -coverprofile=coverage.out`
-# writes must stay at or above 90%.
-profile: coverage.out
-threshold:
-  total: 90

@@ -1,6 +1,7 @@
 ---
 title: Walking a yaml.Node skips yaml.v3's alias guard, so the walk must handle aliases itself
 date: 2026-10-13
+last_updated: 2026-10-13
 category: best-practices
 module: internal/spec
 problem_type: best_practice
@@ -11,14 +12,15 @@ applies_when:
   - The YAML comes from someone other than the operator, such as a workflow file pushed to a repository
   - A walk checks mapping keys against an allowed list
   - A walk reports refusals with a node's line
-tags: [yaml, yaml-node, alias, anchor, billion-laughs, cwe-776, workflow-file, validation]
+  - A key is added to internal/spec's format, or moved between not supported yet and unknown
+tags: [yaml, yaml-node, alias, anchor, billion-laughs, cwe-776, workflow-file, validation, unsupported-key]
 ---
 
 # Walking a yaml.Node skips yaml.v3's alias guard, so the walk must handle aliases itself
 
 ## Context
 
-Issue #34 parses workflow files in `internal/spec` by decoding into a `yaml.Node` and walking it (plan KTD3, `docs/plans/2026-10-13-0305-issue-34-plan.md`). This gives errors that carry a key, a path and a line. While building it, a helper `resolve` was added to follow YAML aliases wherever the walk reads a node (`internal/spec/spec.go:163`). Neither the plan nor the code says anything about anchors or aliases. The review of #34 (ce-code-review run `20261013-031236-1b643012`) found three problems with this, and each was reproduced against the branch. The plan, the code and the tests do not record any of them.
+Issue #34 parses workflow files in `internal/spec` by decoding into a `yaml.Node` and walking it (plan KTD3, `docs/plans/2026-10-13-0305-issue-34-plan.md`). This gives errors that carry a key, a path and a line. While building it, a helper `resolve` was added to follow YAML aliases wherever the walk reads a node (`internal/spec/spec.go:163`). Neither the plan nor the code says anything about anchors or aliases. The review of #34 (ce-code-review run `20261013-031236-1b643012`) found three problems with this, and each was reproduced against the branch. The line numbers in this list are those of the #34 branch. The plan, the code and the tests do not record any of them.
 
 1. **No alias budget.** yaml.v3 refuses input that expands too much through aliases ("document contains excessive aliasing"). It runs that check only when it decodes into Go values. In `decoder.unmarshal`, the ratio check comes first, but for a `yaml.Node` target the function stores the node and returns at once (`decode.go:484-495` of go.yaml.in/yaml/v3 v3.0.5, in the Go module cache). The node keeps its aliases as `AliasNode`s that point at their anchors, so the tree stays the size of the input. The expansion happens later, in our own walk, and nothing limits it there. An 82,926-byte file that anchors a 2,000-item `commands` list and points 2,000 steps at it with `commands: *c` made `Parse` return 4,002,000 commands and allocate 267 MB, with no error. The review measured 100 million commands and about 6.9 GB from a 409 KB file. The cost grows with the square of the file size.
 2. **Alias keys pass the key allow list.** For an alias, the parser sets the node's `Value` to the anchor's label (`decode.go:214-216`). `fields` checks `key.Value` against the allowed keys (`spec.go:183`), so in `steps: [{commands: &name [echo ok], *name: build}]` the key `*name` passes as the allowed key `name`. `Parse` returns a step named `build` with no error, although the step never has a real `name` key.
@@ -30,14 +32,14 @@ When code walks a `yaml.Node`, it owns alias handling. yaml.v3 does none of it f
 
 - **Choose an alias policy explicitly, and write it into the format.** Either refuse every `AliasNode`, which is the simplest and fixes all three problems with one check, or allow aliases only where they cannot amplify.
 - **Never follow an alias to a sequence or a mapping without a budget.** Only those multiply the work. A scalar alias costs one node each time it is used. Refuse a sequence or mapping alias at the alias's own line, or keep a running total of the items the walk produces and stop when it passes a cap.
-- **Check a key's `Kind` before its `Value`.** A key must be a `yaml.ScalarNode` before it is compared with the allowed keys. An `AliasNode` key carries the anchor's label in `Value`, and a mapping or sequence key carries nothing useful there.
+- **Check a key's `Kind` before its `Value`.** A key must be a `yaml.ScalarNode` before it is compared with the allowed keys. An `AliasNode` key carries the anchor's label in `Value`, and a mapping or sequence key carries nothing useful there. `internal/spec` resolves the key through its alias first and then requires a scalar (issue #68, `internal/spec/spec.go:200-202`), so an alias to plain text acts as that text, and errors and paths carry the resolved key, never the anchor's label.
 - **Report the line where the alias is used.** Keep the unresolved node and take the line from it, and use the resolved node only for its content.
 
 ## Why This Matters
 
-The engine is meant to read workflow files from each repository's `.crew/workflows/` directory, through GitHub events (`docs/architecture.md`). Anyone who can push such a file, for example in a pull request, controls the input to `Parse`. A file a few megabytes long would exhaust the memory of whatever process parses it. yaml.v3's guard leaves the impression that alias bombs are already handled, and they are, but only on the decode path this design does not use. The other two problems weaken guarantees the format makes: that any key outside the allowed list is refused (`spec.go:21`), and that each refusal names the line at fault (KTD5).
+The engine is meant to read workflow files from each repository's `.crew/workflows/` directory, through GitHub events (`docs/architecture.md`). Anyone who can push such a file, for example in a pull request, controls the input to `Parse`. A file a few megabytes long would exhaust the memory of whatever process parses it. yaml.v3's guard leaves the impression that alias bombs are already handled, and they are, but only on the decode path this design does not use. The other two problems weaken guarantees the format makes: that any key outside the allowed list is refused (the package doc of `internal/spec/spec.go`), and that each refusal names the line at fault (KTD5).
 
-Later parts of #34 inherit this walk. Part 4 sorts refused keys into "not supported yet" or "unknown", and part 5 adds `retry`. Each new key or level is another place where an alias can be followed.
+Later parts inherit this walk. Issue #68 sorted refused keys into "not supported yet" or "unknown", and a later part adds `retry`. Each new key or level is another place where an alias can be followed.
 
 ## When to Apply
 
@@ -46,7 +48,17 @@ Later parts of #34 inherit this walk. Part 4 sorts refused keys into "not suppor
 
 ## Examples
 
-Status as of this writing: all three findings are open on branch `crew/issue-34-development`. The review rated #1 P1 and the other two P3, and nothing was applied, because the fix waits on a decision about whether workflow files may use anchors at all (review finding #2). The review suggested this fix if aliases to scalars stay allowed:
+Status when #34 merged (PR #47): all three findings were open. The review rated #1 P1 and the other two P3, and nothing was applied, because the fix waited on a decision about whether workflow files may use anchors at all.
+
+Status after issue #68 (branch `crew/issue-68-development`, unmerged as of this writing):
+
+- **#2 is closed, with a different policy from the snippet below.** Anchors stay allowed. `fields` resolves each key through `resolve`, refuses one that does not resolve to a scalar ("a key must be plain text", at the mapping's path and the key's own line), and only then checks the allowed keys (`internal/spec/spec.go:196-216`). So `steps: [{commands: &name [echo ok], *name: build}]` is now refused, while a key `*c` whose anchor is the string `commands` is read as `commands`. The snippet's `key.Kind != yaml.ScalarNode` check, run before resolving, would instead refuse every alias key.
+- **#1 stays open as an accepted risk.** The #68 plan (`docs/plans/2026-10-13-1432-issue-68-plan.md`, Scope Boundaries) leaves the alias budget out: any local user or process that can reach the engine can already run commands through it, and refusing aliases to lists and mappings would narrow the file format, which is a product call. Slice 9, which listens beyond loopback, must close it.
+- **#3 stays open.** `step` still passes `resolve(item)` to `checkCommand` (`internal/spec/spec.go:299`), which reports the resolved node's line.
+
+Issue #68 also overturned a decision the #34 plan still states. That plan's test scenarios say a top-level `depends_on` is refused with the refused-key error (`docs/plans/2026-10-13-0305-issue-34-plan.md:106`). It is now an `*UnsupportedKeyError` ("not supported yet"), as are a workflow's `when`, `queue`, `labels`, `image` and `settings` and a step's `when`. Every other key outside the allowed list stays a `*KeyError` ("unknown key"). These known keys are string literals at the two calls of `fields` (`internal/spec/spec.go:250-251` and `:282`), not package constants as the #68 plan says: Go has no constant slices, and `gochecknoglobals` in `.golangci.yml` refuses package-level variables outside tests. To move a key between unknown, not supported yet and allowed, edit those call sites.
+
+The #34 review's suggested fix, kept for reference:
 
 ```go
 // in fields, before the allowed-key check
@@ -69,3 +81,5 @@ Tests that pin each case:
 
 - Issue #34, Parse the workflow file format in internal/spec
 - `docs/plans/2026-10-13-0305-issue-34-plan.md`, KTD3 and KTD5
+- Issue #68, Refuse workflow keys slice 0 does not implement yet
+- `docs/plans/2026-10-13-1432-issue-68-plan.md`, KTD14 and Scope Boundaries
