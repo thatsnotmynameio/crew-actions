@@ -1,0 +1,110 @@
+// The runner protocol: the calls a runner makes to the engine to take a
+// workflow, run it and report it (docs/architecture.md, section 5). The
+// runner always opens the connection.
+syntax = "proto3";
+
+package crewactions.protocol.v1;
+
+option go_package = "github.com/thatsnotmynameio/crew-actions/internal/protocol";
+
+// RunnerService is the engine as a runner sees it.
+service RunnerService {
+  // Next is a long poll that returns a pending workflow, or nothing when none
+  // came within the engine's window.
+  rpc Next(NextRequest) returns (NextResponse);
+  // Accept takes the workflow Next handed out and starts its attempt. When
+  // the workflow's version moved since, another runner took it, and the
+  // caller drops it.
+  rpc Accept(AcceptRequest) returns (AcceptResponse);
+  // Update reports a step's state.
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  // Log appends a chunk of a step's output, by offset, so a resend is safe.
+  rpc Log(LogRequest) returns (LogResponse);
+  // Done reports the attempt's outcome, which ends it.
+  rpc Done(DoneRequest) returns (DoneResponse);
+}
+
+// StepState is the state a runner reports for a step.
+enum StepState {
+  STEP_STATE_UNSPECIFIED = 0;
+  STEP_STATE_RUNNING = 1;
+  STEP_STATE_FINISHED = 2;
+  STEP_STATE_SKIPPED = 3;
+}
+
+// Outcome is how a finished step or attempt ended.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_SUCCESS = 1;
+  OUTCOME_FAILURE = 2;
+}
+
+// Workflow is a compiled workflow file: what Next hands out, and what the
+// engine stores as the workflow's definition.
+message Workflow {
+  string name = 1;
+  // Steps run in this order.
+  repeated Step steps = 2;
+}
+
+// Step is one step of a workflow.
+message Step {
+  string name = 1;
+  // Commands run in one shell, in this order.
+  repeated string commands = 2;
+}
+
+message NextRequest {}
+
+message NextResponse {
+  int64 workflow_id = 1;
+  // Version is the workflow's version once handed out, which Accept compares.
+  int64 version = 2;
+  // Workflow is unset when no workflow was handed out.
+  Workflow workflow = 3;
+}
+
+message AcceptRequest {
+  int64 workflow_id = 1;
+  // Version is the one Next returned.
+  int64 version = 2;
+}
+
+message AcceptResponse {
+  int64 attempt_id = 1;
+}
+
+message UpdateRequest {
+  int64 attempt_id = 1;
+  // Position is the step's place in the workflow, counted from 1.
+  int32 position = 2;
+  StepState state = 3;
+  // Outcome is set only when the state is finished.
+  Outcome outcome = 4;
+  // ExitStatus is unset when the step reported none.
+  optional int32 exit_status = 5;
+}
+
+message UpdateResponse {}
+
+message LogRequest {
+  int64 attempt_id = 1;
+  // Position is the step's place in the workflow, counted from 1.
+  int32 position = 2;
+  // Offset is where data starts in the step's output.
+  int64 offset = 3;
+  // Data holds at most 64 KiB.
+  bytes data = 4;
+}
+
+message LogResponse {
+  // Size is how many bytes of the step's output the engine now holds.
+  int64 size = 1;
+}
+
+message DoneRequest {
+  int64 attempt_id = 1;
+  Outcome outcome = 2;
+}
+
+message DoneResponse {}
