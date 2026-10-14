@@ -122,7 +122,7 @@ func stepState(s *api.StepEvent) string {
 		return stateName(s.GetState().String(), "STEP_STATE_")
 	}
 	state := "finished with " + outcomeName(s.GetOutcome())
-	if s.ExitStatus != nil && s.GetExitStatus() != 0 {
+	if s.GetExitStatus() != 0 {
 		state += fmt.Sprintf(", exit status %d", s.GetExitStatus())
 	}
 	return state

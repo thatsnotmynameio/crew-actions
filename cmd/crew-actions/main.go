@@ -39,8 +39,8 @@ const (
 	exitInterrupted = 130
 )
 
-// defaultEngineURL is where the runner and run reach the engine, which
-// listens on defaultAddr.
+// defaultAddr is where the engine listens, and defaultEngineURL where the
+// runner and run reach it.
 const (
 	defaultAddr      = "127.0.0.1:7700"
 	defaultEngineURL = "http://" + defaultAddr
