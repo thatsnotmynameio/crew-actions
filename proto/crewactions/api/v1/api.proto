@@ -1,0 +1,111 @@
+// The client API: how a client, such as run, starts a build and follows it,
+// apart from the runner protocol (docs/architecture.md, section 3).
+syntax = "proto3";
+
+package crewactions.api.v1;
+
+option go_package = "github.com/thatsnotmynameio/crew-actions/internal/api";
+
+// BuildService is the engine as a client sees it.
+service BuildService {
+  // Submit creates a build from one workflow file. A file the engine refuses
+  // creates nothing.
+  rpc Submit(SubmitRequest) returns (SubmitResponse);
+  // Follow streams a build's states and output from its start, and ends with
+  // the build's end.
+  rpc Follow(FollowRequest) returns (stream FollowResponse);
+}
+
+// WorkflowState is where a workflow is in its lifecycle.
+enum WorkflowState {
+  WORKFLOW_STATE_UNSPECIFIED = 0;
+  WORKFLOW_STATE_PENDING = 1;
+  WORKFLOW_STATE_ASSIGNED = 2;
+  WORKFLOW_STATE_RUNNING = 3;
+  WORKFLOW_STATE_FINISHED = 4;
+}
+
+// StepState is where a step is within its attempt.
+enum StepState {
+  STEP_STATE_UNSPECIFIED = 0;
+  STEP_STATE_PENDING = 1;
+  STEP_STATE_RUNNING = 2;
+  STEP_STATE_FINISHED = 3;
+  STEP_STATE_SKIPPED = 4;
+}
+
+// Outcome is how a finished build, workflow or step ended.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_SUCCESS = 1;
+  OUTCOME_FAILURE = 2;
+}
+
+message SubmitRequest {
+  // Host, Organization and Repository are the identity of the repository
+  // the build belongs to.
+  string host = 1;
+  string organization = 2;
+  string repository = 3;
+  // FileName names the workflow, as its base name without the extension.
+  string file_name = 4;
+  // Content is the workflow file.
+  bytes content = 5;
+}
+
+message SubmitResponse {
+  int64 build_id = 1;
+}
+
+message FollowRequest {
+  int64 build_id = 1;
+}
+
+// FollowResponse is one event of a build. A step's output always comes
+// before its terminal state, and the build's end comes last.
+message FollowResponse {
+  oneof event {
+    WorkflowEvent workflow = 1;
+    StepEvent step = 2;
+    OutputEvent output = 3;
+    BuildEnd end = 4;
+  }
+}
+
+// WorkflowEvent is a workflow's new state.
+message WorkflowEvent {
+  string name = 1;
+  WorkflowState state = 2;
+  // Outcome is set only when the state is finished.
+  Outcome outcome = 3;
+}
+
+// StepEvent is a step's new state within an attempt.
+message StepEvent {
+  // Attempt counts the workflow's attempts from 1.
+  int32 attempt = 1;
+  // Position is the step's place in the workflow, counted from 1.
+  int32 position = 2;
+  string name = 3;
+  StepState state = 4;
+  // Outcome is set only when the state is finished.
+  Outcome outcome = 5;
+  // ExitStatus is unset when the step reported none.
+  optional int32 exit_status = 6;
+}
+
+// OutputEvent is a chunk of a step's output.
+message OutputEvent {
+  // Attempt counts the workflow's attempts from 1.
+  int32 attempt = 1;
+  // Position is the step's place in the workflow, counted from 1.
+  int32 position = 2;
+  // Offset is where data starts in the step's output.
+  int64 offset = 3;
+  bytes data = 4;
+}
+
+// BuildEnd is the build's end, the stream's last event.
+message BuildEnd {
+  Outcome outcome = 1;
+}

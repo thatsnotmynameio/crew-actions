@@ -1,0 +1,8 @@
+# buf's module: the protos under proto/, linted with buf's STANDARD rules.
+# buf.gen.yaml generates the Go code from them.
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD

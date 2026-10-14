@@ -5,14 +5,18 @@ go 1.27
 toolchain go1.27.2
 
 tool (
+	connectrpc.com/connect/v2/cmd/protoc-gen-connect-go
 	github.com/rhysd/actionlint/cmd/actionlint
 	golang.org/x/vuln/cmd/govulncheck
+	google.golang.org/protobuf/cmd/protoc-gen-go
 )
 
 require (
+	connectrpc.com/connect/v2 v2.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.29.0
 	go.yaml.in/yaml/v3 v3.0.5
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
