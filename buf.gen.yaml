@@ -1,0 +1,16 @@
+# buf generates the protos' messages into internal/protocol and internal/api,
+# and their connect code under internal/transport/connect, the one package
+# that imports connect-go (docs/architecture.md, section 4). buf runs from its
+# release binary, v1.73.0, since its documentation advises against go tool,
+# and the two plugins run through go.mod's tool directive (section 6). The
+# generated code is committed. From the repository root:
+#   buf lint
+#   buf generate
+version: v2
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: internal
+    opt: module=github.com/thatsnotmynameio/crew-actions/internal
+  - local: ["go", "tool", "protoc-gen-connect-go"]
+    out: internal/transport/connect
+    opt: module=github.com/thatsnotmynameio/crew-actions/internal
