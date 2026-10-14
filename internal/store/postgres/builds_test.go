@@ -412,3 +412,27 @@ func TestAnErrorInTxUndoesFinishAttempt(t *testing.T) {
 		t.Errorf("workflow = %s, attempt finished at %v; want running and open", w.State, w.Attempts[0].FinishedAt)
 	}
 }
+
+func TestGetBuildJoinsTheContextsTransaction(t *testing.T) {
+	s := newStore(t)
+	var id model.BuildID
+	err := s.InTx(t.Context(), func(ctx context.Context) error {
+		var err error
+		id, err = s.CreateBuild(ctx, repository, []model.NewWorkflow{{Name: "test", Definition: definition}})
+		if err != nil {
+			return err
+		}
+		// The build is not committed, so only the context's transaction
+		// sees it.
+		if _, err := s.GetBuild(ctx, id); err != nil {
+			return err
+		}
+		return errStop
+	})
+	if !errors.Is(err, errStop) {
+		t.Fatalf("InTx() error = %v, want %v", err, errStop)
+	}
+	if _, err := s.GetBuild(t.Context(), id); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("GetBuild(%d) after the rollback error = %v, want %v", id, err, model.ErrNotFound)
+	}
+}

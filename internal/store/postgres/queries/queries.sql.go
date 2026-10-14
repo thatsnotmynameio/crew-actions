@@ -34,6 +34,37 @@ func (q *Queries) AssignWorkflow(ctx context.Context, db DBTX, arg AssignWorkflo
 	return i, err
 }
 
+const attemptWorkflow = `-- name: AttemptWorkflow :one
+SELECT a.workflow_id, w.build_id, a.number
+FROM attempts a
+JOIN workflows w ON w.id = a.workflow_id
+WHERE a.id = $1
+`
+
+type AttemptWorkflowRow struct {
+	WorkflowID int64
+	BuildID    int64
+	Number     int32
+}
+
+func (q *Queries) AttemptWorkflow(ctx context.Context, db DBTX, id int64) (AttemptWorkflowRow, error) {
+	row := db.QueryRow(ctx, attemptWorkflow, id)
+	var i AttemptWorkflowRow
+	err := row.Scan(&i.WorkflowID, &i.BuildID, &i.Number)
+	return i, err
+}
+
+const databaseID = `-- name: DatabaseID :one
+SELECT id::text FROM database_identity
+`
+
+func (q *Queries) DatabaseID(ctx context.Context, db DBTX) (string, error) {
+	row := db.QueryRow(ctx, databaseID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const failRunningSteps = `-- name: FailRunningSteps :exec
 UPDATE steps
 SET state = 'finished', outcome = 'failure', finished_at = now()
@@ -572,6 +603,17 @@ func (q *Queries) UnfinishedWorkflows(ctx context.Context, db DBTX, buildID int6
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const workflowDefinition = `-- name: WorkflowDefinition :one
+SELECT definition FROM workflows WHERE id = $1
+`
+
+func (q *Queries) WorkflowDefinition(ctx context.Context, db DBTX, id int64) ([]byte, error) {
+	row := db.QueryRow(ctx, workflowDefinition, id)
+	var definition []byte
+	err := row.Scan(&definition)
+	return definition, err
 }
 
 const workflowExists = `-- name: WorkflowExists :one

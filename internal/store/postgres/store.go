@@ -56,10 +56,16 @@ type txKey struct{}
 // it as fn returned it. When ctx already carries a transaction, fn runs in
 // it, and the outermost InTx commits or rolls back.
 func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return s.inTx(ctx, pgx.TxOptions{}, fn)
+}
+
+// inTx is InTx, with opts for the transaction it begins when ctx carries
+// none.
+func (s *Store) inTx(ctx context.Context, opts pgx.TxOptions, fn func(ctx context.Context) error) error {
 	if txFrom(ctx) != nil {
 		return fn(ctx)
 	}
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.pool.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("begin a transaction: %w", err)
 	}

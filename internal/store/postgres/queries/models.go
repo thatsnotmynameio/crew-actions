@@ -6,6 +6,8 @@ package queries
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Attempt struct {
@@ -30,6 +32,11 @@ type Build struct {
 	Outcome      *string
 	CreatedAt    time.Time
 	FinishedAt   *time.Time
+}
+
+type DatabaseIdentity struct {
+	One bool
+	ID  pgtype.UUID
 }
 
 type Step struct {

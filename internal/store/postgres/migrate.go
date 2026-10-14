@@ -34,12 +34,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// newProvider returns a goose provider of the embedded migrations on db,
-// which migrates under goose's Postgres session lock.
-func newProvider(db *sql.DB) (*goose.Provider, error) {
+// Migrations returns the migrations Migrate applies, one file each.
+func Migrations() (fs.FS, error) {
 	dir, err := fs.Sub(migrations, "migrations")
 	if err != nil {
 		return nil, fmt.Errorf("read the migrations: %w", err)
+	}
+	return dir, nil
+}
+
+// newProvider returns a goose provider of the embedded migrations on db,
+// which migrates under goose's Postgres session lock.
+func newProvider(db *sql.DB) (*goose.Provider, error) {
+	dir, err := Migrations()
+	if err != nil {
+		return nil, err
 	}
 	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {

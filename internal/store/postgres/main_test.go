@@ -69,7 +69,8 @@ func requireDatabase(t *testing.T) string {
 }
 
 // newStore returns a store on the migrated database, with every table
-// emptied, and skips the test without a database.
+// but the database's identity emptied, and skips the test without a
+// database.
 func newStore(t *testing.T) *Store {
 	t.Helper()
 	s := open(t, requireDatabase(t))
