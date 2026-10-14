@@ -3,7 +3,9 @@
 // One core, Engine, serves runners through Runners, which implements
 // protocol.Engine: Next hands out the oldest pending workflow, Accept
 // starts its attempt, Update and Log record its steps' states and output,
-// and Done ends it.
+// and Done ends it. It serves clients through Clients, which implements
+// api.Builds: Submit creates a build from a workflow file, and Follow
+// streams the build's states and output to its end.
 //
 // The engine writes through the store and log interfaces it declares here,
 // which internal/store/postgres and internal/store/logs implement. Every
@@ -16,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/thatsnotmynameio/crew-actions/internal/api"
 	"github.com/thatsnotmynameio/crew-actions/internal/model"
 	"github.com/thatsnotmynameio/crew-actions/internal/protocol"
 )
@@ -24,7 +27,8 @@ import (
 const (
 	// window is how long Next waits for work before it returns nothing.
 	window = 25 * time.Second
-	// tick is how often Next looks for work again with no change notified.
+	// tick is how often Next looks for work, and Follow at the build, again
+	// with no change notified.
 	tick = time.Second
 )
 
@@ -73,8 +77,14 @@ type Attempts interface {
 	FinishAttempt(ctx context.Context, id model.AttemptID, outcome model.Outcome) error
 }
 
-// Builds finishes builds.
+// Builds creates builds, reads them and finishes them.
 type Builds interface {
+	// CreateBuild creates a running build of repo with workflows, each
+	// pending, and returns its id.
+	CreateBuild(ctx context.Context, repo model.Repository, workflows []model.NewWorkflow) (model.BuildID, error)
+	// GetBuild returns the snapshot of the build id, with every workflow,
+	// attempt and step, read in one consistent snapshot when alone.
+	GetBuild(ctx context.Context, id model.BuildID) (model.Build, error)
 	// FinishBuild moves the build id to finished with outcome.
 	FinishBuild(ctx context.Context, id model.BuildID, outcome model.Outcome) error
 }
@@ -87,6 +97,11 @@ type Logs interface {
 	// Append writes the bytes of data, which starts at offset, that the log
 	// does not hold yet, and returns how many bytes it holds then.
 	Append(attempt model.AttemptID, position int, offset int64, data []byte) (int64, error)
+	// Size returns how many bytes the log holds, 0 when it does not exist.
+	Size(attempt model.AttemptID, position int) (int64, error)
+	// Read returns at most limit bytes of the log from offset on, none at
+	// its end or when it does not exist.
+	Read(attempt model.AttemptID, position int, offset int64, limit int) ([]byte, error)
 }
 
 // Engine is the engine's core. It is safe for concurrent use.
@@ -96,14 +111,15 @@ type Engine struct {
 	notify *notifier
 	// stopped is closed once the engine stops.
 	stopped <-chan struct{}
-	// window is how long Next waits for work, and tick how often it looks
-	// again with no change notified.
+	// window is how long Next waits for work, and tick how often Next and
+	// Follow look again with no change notified.
 	window time.Duration
 	tick   time.Duration
 }
 
 // New returns the engine on store and logs. Cancelling stop stops it: Next
-// then returns nothing without handing a workflow out.
+// then returns nothing without handing a workflow out, and Follow returns
+// model.ErrUnavailable.
 func New(stop context.Context, store Store, logs Logs) *Engine {
 	return &Engine{
 		store:   store,
@@ -126,3 +142,15 @@ type Runners struct {
 }
 
 var _ protocol.Engine = (*Runners)(nil)
+
+// Clients returns the engine as clients see it.
+func (e *Engine) Clients() *Clients {
+	return &Clients{engine: e}
+}
+
+// Clients is the engine as clients see it: it implements api.Builds.
+type Clients struct {
+	engine *Engine
+}
+
+var _ api.Builds = (*Clients)(nil)
