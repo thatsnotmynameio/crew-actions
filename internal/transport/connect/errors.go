@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect/v2"
 
@@ -35,18 +36,26 @@ func toConnect(err error) error {
 	}
 }
 
+// incompleteEnvelope starts the message of the error connect-go makes when a
+// stream stops in the middle of a message, which a dying server does.
+const incompleteEnvelope = "protocol error: incomplete envelope"
+
 // fromConnect returns the error a client returns for err, which a call made
-// with ctx failed with: the context's error when ctx is done, the sentinel
-// of internal/model the server's code stands for, model.ErrUnavailable when
-// the server sent no code, such as when it could not be reached or cut the
-// stream, and errServer for any other code.
+// with ctx failed with: the context's error when ctx is done,
+// model.ErrUnavailable for an error connect-go did not make, such as
+// errNoEnd, fromLocal's error for one it made on the client, the sentinel of
+// internal/model the server's code stands for, and errServer for any other
+// code.
 func fromConnect(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr //nolint:wrapcheck // the caller compares it with its context's error
 	}
 	cerr, ok := errors.AsType[*connect.Error](err)
-	if !ok || !cerr.IsRemote() {
+	if !ok {
 		return unavailable(err)
+	}
+	if !cerr.IsRemote() {
+		return fromLocal(cerr)
 	}
 	switch cerr.Code() {
 	case connect.CodeInvalidArgument, connect.CodeResourceExhausted:
@@ -60,6 +69,20 @@ func fromConnect(ctx context.Context, err error) error {
 	default:
 		return errServer
 	}
+}
+
+// fromLocal returns the error a client returns for err, which connect-go
+// made on the client: model.ErrUnavailable when it means the server is
+// gone, as an Unavailable, such as a refused connection, and a stream cut in
+// the middle of a message do, and errServer otherwise, such as for a 403 or
+// a 404 from a wrong address, which no caller retries. Both keep the reason
+// err gives.
+func fromLocal(err *connect.Error) error {
+	cut := err.Code() == connect.CodeInvalidArgument && strings.HasPrefix(err.Message(), incompleteEnvelope)
+	if err.Code() == connect.CodeUnavailable || cut {
+		return unavailable(err)
+	}
+	return fmt.Errorf("%w: %s", errServer, err.Error())
 }
 
 // unavailable returns model.ErrUnavailable with the reason err gives.

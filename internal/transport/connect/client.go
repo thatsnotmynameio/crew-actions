@@ -107,7 +107,7 @@ func (c buildsClient) Follow(ctx context.Context, req *api.FollowRequest, send f
 	for {
 		res, err := stream.Receive()
 		if errors.Is(err, io.EOF) {
-			return unavailable(errNoEnd)
+			return fromConnect(ctx, errNoEnd)
 		}
 		if err != nil {
 			return fromConnect(ctx, err)
