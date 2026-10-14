@@ -22,10 +22,10 @@ var errStopped = errors.New("the engine is stopping")
 // the context's error once ctx is done, and then assigns nothing (KTD5).
 func (r *Runners) Next(ctx context.Context, _ *protocol.NextRequest) (*protocol.NextResponse, error) {
 	e := r.engine
-	window := time.NewTimer(e.window)
-	defer window.Stop()
-	tick := time.NewTicker(e.tick)
-	defer tick.Stop()
+	deadline := time.NewTimer(e.window)
+	defer deadline.Stop()
+	ticker := time.NewTicker(e.tick)
+	defer ticker.Stop()
 	for {
 		// Subscribed before the read, so a write after it still wakes us.
 		changed := e.notify.subscribe()
@@ -38,8 +38,8 @@ func (r *Runners) Next(ctx context.Context, _ *protocol.NextRequest) (*protocol.
 		}
 		select {
 		case <-changed:
-		case <-tick.C:
-		case <-window.C:
+		case <-ticker.C:
+		case <-deadline.C:
 			return &protocol.NextResponse{}, nil
 		case <-e.stopped:
 			return &protocol.NextResponse{}, nil
