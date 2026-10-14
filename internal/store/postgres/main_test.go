@@ -97,11 +97,17 @@ func TestStoresOfParallelTestsAreIndependent(t *testing.T) {
 	for _, name := range []string{"first", "second"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			// A test that stops early still releases both barriers, so the
+			// other does not wait for it forever.
+			openedDone := sync.OnceFunc(opened.Done)
+			insertedDone := sync.OnceFunc(inserted.Done)
+			defer openedDone()
+			defer insertedDone()
 			s := newStore(t)
-			opened.Done()
+			openedDone()
 			opened.Wait()
 			createBuild(t, s, "test")
-			inserted.Done()
+			insertedDone()
 			inserted.Wait()
 			if got := countBuilds(t, s); got != 1 {
 				t.Errorf("builds = %d, want only the test's own", got)
