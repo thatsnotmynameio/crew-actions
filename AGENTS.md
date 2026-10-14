@@ -21,6 +21,6 @@ go test ./...
 ```
 
 - Without the variable the store's tests skip, and `go test` shows the skip only with `-v`.
-- Only one test run at a time should use the database for now: the tests empty its tables and create and drop databases.
+- Only one test run at a time should use the database for now: each test gets a database of its own, but the store's tests name their empty databases `empty_1`, `empty_2` and so on, so two runs at once collide.
 - After changing a migration or switching branches, run `docker compose down` and start the server again, so the tests begin from an empty server.
 - `docker compose down` stops the server for every worktree, since they all share it.

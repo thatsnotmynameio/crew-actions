@@ -3,50 +3,24 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/thatsnotmynameio/crew-actions/internal/store/postgres/internal/testdb"
 )
 
-// The harness: TestMain migrates the database that
-// CREW_ACTIONS_TEST_DATABASE_URL names, which compose.yaml's test-postgres
-// serves locally and in CI's Linux job. A test asks for a store on that
-// database, or for an empty database of its own. Without the variable, as
-// on GitHub's macOS runners, the tests that need Postgres skip.
+// The harness: a test asks for a store on a migrated database of its own,
+// copied from the template testdb makes on the server
+// CREW_ACTIONS_TEST_DATABASE_URL names, or for an empty database of its
+// own on that server. compose.yaml's test-postgres serves it locally and
+// in CI's Linux job. Without the variable, as on GitHub's macOS runners,
+// the tests that need Postgres skip.
 
-// databaseURLEnv names the variable that holds the test database's URL.
-const databaseURLEnv = "CREW_ACTIONS_TEST_DATABASE_URL"
-
-var (
-	// databaseURL is the URL of the migrated database. It is empty when
-	// the variable is unset.
-	databaseURL string
-	// databases counts the empty databases tests created, to name them.
-	databases atomic.Int64
-)
-
-func TestMain(m *testing.M) {
-	os.Exit(runTests(m))
-}
-
-// runTests migrates the database the variable names, when it is set, runs
-// the tests and returns their exit code. A database that cannot be reached
-// or migrated fails the run: only an unset variable skips.
-func runTests(m *testing.M) int {
-	u := os.Getenv(databaseURLEnv)
-	if u == "" {
-		return m.Run()
-	}
-	if err := migrate(context.Background(), u); err != nil {
-		fmt.Fprintf(os.Stderr, "migrate the database %s names: %v\n", databaseURLEnv, err)
-		return 1
-	}
-	databaseURL = u
-	return m.Run()
-}
+// databases counts the empty databases tests created, to name them.
+var databases atomic.Int64
 
 // migrate applies the store's migrations to the database at u.
 func migrate(ctx context.Context, u string) error {
@@ -58,26 +32,15 @@ func migrate(ctx context.Context, u string) error {
 	return s.Migrate(ctx)
 }
 
-// requireDatabase returns the migrated database's URL, and skips the test
-// without one.
-func requireDatabase(t *testing.T) string {
-	t.Helper()
-	if databaseURL == "" {
-		t.Skipf("%s is unset, so the tests that need Postgres skip", databaseURLEnv)
-	}
-	return databaseURL
-}
-
-// newStore returns a store on the migrated database, with every table
-// but the database's identity emptied, and skips the test without a
-// database.
+// newStore returns a store on a migrated database of its own, which the
+// test's end drops, and skips the test without a server.
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	s := open(t, requireDatabase(t))
-	if _, err := s.pool.Exec(t.Context(), "TRUNCATE builds, workflows, attempts, steps RESTART IDENTITY"); err != nil {
-		t.Fatalf("empty the tables: %v", err)
+	dir, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return s
+	return open(t, testdb.New(t, dir, migrate))
 }
 
 // open opens a store on the database at u, which the test's end closes.
@@ -92,10 +55,10 @@ func open(t *testing.T, u string) *Store {
 }
 
 // emptyDatabase creates a database no migration ran on, which the test's
-// end drops, and returns its URL. It skips the test without a database.
+// end drops, and returns its URL. It skips the test without a server.
 func emptyDatabase(t *testing.T) string {
 	t.Helper()
-	admin := requireDatabase(t)
+	admin := testdb.Server(t)
 	name := fmt.Sprintf("empty_%d", databases.Add(1))
 	conn, err := pgx.Connect(t.Context(), admin)
 	if err != nil {
@@ -116,10 +79,33 @@ func emptyDatabase(t *testing.T) string {
 			t.Errorf("drop database %s: %v", name, err)
 		}
 	})
-	u, err := url.Parse(admin)
+	u, err := testdb.WithDatabase(admin, name)
 	if err != nil {
-		t.Fatalf("parse %q: %v", admin, err)
+		t.Fatal(err)
 	}
-	u.Path = "/" + name
-	return u.String()
+	return u
+}
+
+func TestStoresOfParallelTestsAreIndependent(t *testing.T) {
+	t.Parallel()
+	// Each test opens its store, then inserts a build, then counts the
+	// builds, and waits for the other at each step, so on a shared
+	// database each would see the other's build.
+	var opened, inserted sync.WaitGroup
+	opened.Add(2)
+	inserted.Add(2)
+	for _, name := range []string{"first", "second"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := newStore(t)
+			opened.Done()
+			opened.Wait()
+			createBuild(t, s, "test")
+			inserted.Done()
+			inserted.Wait()
+			if got := countBuilds(t, s); got != 1 {
+				t.Errorf("builds = %d, want only the test's own", got)
+			}
+		})
+	}
 }
