@@ -164,7 +164,11 @@ func TestHostCheck(t *testing.T) {
 		if w.Code != tc.want {
 			t.Errorf("Host %q: status %d, want %d", tc.host, w.Code, tc.want)
 		}
-		if got, want := len(f.requests()), map[bool]int{true: 1}[tc.want == http.StatusOK]; got != want {
+		want := 0
+		if tc.want == http.StatusOK {
+			want = 1
+		}
+		if got := len(f.requests()); got != want {
 			t.Errorf("Host %q: the engine got %d requests, want %d", tc.host, got, want)
 		}
 	}
