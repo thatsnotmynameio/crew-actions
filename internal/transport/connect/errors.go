@@ -41,10 +41,11 @@ func toConnect(err error) error {
 const incompleteEnvelope = "protocol error: incomplete envelope"
 
 // fromConnect returns the error a client returns for err, which a call made
-// with ctx failed with: the context's error when ctx is done, the sentinel
-// of internal/model the server's code stands for, model.ErrUnavailable for
-// an error that is not connect-go's, such as errNoEnd, fromLocal's error
-// when the server sent no code, and errServer for any other code.
+// with ctx failed with: the context's error when ctx is done,
+// model.ErrUnavailable for an error connect-go did not make, such as
+// errNoEnd, fromLocal's error for one it made on the client, the sentinel of
+// internal/model the server's code stands for, and errServer for any other
+// code.
 func fromConnect(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr //nolint:wrapcheck // the caller compares it with its context's error
