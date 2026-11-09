@@ -12,10 +12,10 @@ tool (
 )
 
 require (
-	connectrpc.com/connect/v2 v2.0.0
-	github.com/jackc/pgx/v5 v5.11.0
+	connectrpc.com/connect/v2 v2.0.2
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/pressly/goose/v3 v3.29.0
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	google.golang.org/protobuf v1.36.12
 )
 
