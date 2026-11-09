@@ -36,4 +36,4 @@ jobs:
       contents: write # the release and its assets
       id-token: write # the OIDC token Sigstore certifies the attestation with
       attestations: write # stores the attestation
-    uses: thatsnotmynameio/github-actions/.github/workflows/go-release.yml@e72ce0d0a5da8284edb9aea1cdff812e06c80b54 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/go-release.yml@c1f9af5259f4c51e50a94d73d4c0e450f921d840 # main
